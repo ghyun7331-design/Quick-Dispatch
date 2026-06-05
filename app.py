@@ -40,30 +40,29 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (dataModule 방식 적용)
-def generate_a321_maximize_url(task_str, msn_str="", fsn_str=""):
+# 3-1. A321 전용 Maximize URL (요청하신 정확한 URL 템플릿 강제 적용)
+def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
     
-    revision_id = "773433_SGML_C"
-    item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_12}" # 다이렉트 부모 노드 지정
+    # MSN 추출 실패 시 시스템 에러를 막기 위한 폴백
+    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     
-    wc_params = ["actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR"]
-    
-    if msn_str and str(msn_str).upper() != 'NAN':
-        try:
-            msn_clean = str(int(float(msn_str)))
-            wc_params.append(f"tailNumber:N{msn_clean}")
-        except:
-            pass
-            
-    wc_final = ";".join(wc_params)
-    
-    # context=dataModule 적용
-    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
+    # 전달해주신 URL 구조를 100% 동일하게 하드코딩하여 누락 가능성을 원천 차단했습니다.
+    url = (
+        f"https://w3.airbus.com/1T40/maximize?"
+        f"itemId=773433_SGML_C_EN{task_12}00"
+        f"&parentId=773433_SGML_C_EN{task_12}"
+        f"&itemType=DATAMODULE"
+        f"&itemFormat=HTML"
+        f"&revisionItemId=773433_SGML_C"
+        f"&wc=actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;tailNumber:N{msn_clean}"
+        f"&context=dataModule"
+        f"&viewMinimize=true"
+    )
+    return url
 
 # 3-2. A330 전용 Maximize URL
 def generate_a330_maximize_url(task_str, msn_str=""):
@@ -220,7 +219,7 @@ else:
             with col2:
                 max_url = None
                 if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
-                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value, fsn_value)
+                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
                 elif '330' in db_model_str:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
                 elif '350' in db_model_str:
