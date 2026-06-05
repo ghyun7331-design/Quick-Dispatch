@@ -24,10 +24,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 2. 데이터 로드 (캐시 제거 - 항상 최신 데이터를 읽어옴)
+# 2. 데이터 정제 및 로드
+def clean_tail_number(val):
+    match = re.search(r'(HL\d{4})', str(val))
+    return match.group(1) if match else str(val)
+
+@st.cache_data(ttl=0) # 캐시 우회(항상 최신)
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
+    # 기번 데이터 정제 (소팅 오류 방지)
+    fleet['Tail Number (등록기호)'] = fleet['Tail Number (등록기호)'].apply(clean_tail_number)
     return db, fleet
 
 db_df, fleet_df = load_data()
@@ -37,11 +44,10 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL 생성 함수
+# 3-1. A321 전용 Maximize URL 생성 함수 (A320 Family 통합)
 def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
-    if len(clean_task) < 12: 
-        return None
+    if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
     task_prefix = task_12[:6]
@@ -63,31 +69,19 @@ def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
         
     wc_final = ";".join(wc_params)
     
-    url = (
-        f"https://w3.airbus.com/1T40/maximize"
-        f"?itemId={item_id}"
-        f"&parentId={parent_id}"
-        f"&itemType=DATAMODULE"
-        f"&itemFormat=HTML"
-        f"&revisionItemId={revision_id}"
-        f"&context=document"
-        f"&wc={wc_final}"
-        f"&viewMinimize=true"
-    )
-    return url
+    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
 
 # 3-2. A330 전용 Maximize URL 생성 함수
 def generate_a330_maximize_url(task_str, fsn_str="", msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
-    if len(clean_task) < 12: 
-        return None
+    if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
     task_prefix = task_12[:6]
     
     revision_id = "768908_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_prefix}040" # A330 룰 적용
+    parent_id = f"{revision_id}_EN{task_prefix}040"
     
     wc_params = ["actype:A330", "customization:AAR", "doctype:AMM"]
     
@@ -100,18 +94,45 @@ def generate_a330_maximize_url(task_str, fsn_str="", msn_str=""):
             
     wc_final = ";".join(wc_params)
     
-    url = (
-        f"https://w3.airbus.com/1T40/maximize"
-        f"?itemId={item_id}"
-        f"&parentId={parent_id}"
-        f"&itemType=DATAMODULE"
-        f"&itemFormat=HTML"
-        f"&revisionItemId={revision_id}"
-        f"&context=document"
-        f"&wc={wc_final}"
-        f"&viewMinimize=true"
-    )
-    return url
+    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
+
+# 3-3. A350 전용 URL 생성 함수 (S1000D 체계 / XX 와일드카드 TOC 전환 로직)
+def generate_a350_url(task_str, msn_str=""):
+    task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
+    rev = "776735_S1KD_C"
+    
+    msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
+    wc = f"actype:A350;customization:AAR;doctype:Line%20Maintenance;tailNumber:P{msn_clean}"
+    
+    # XX가 포함된 범용 작업은 TOC 뷰어로 우회
+    if 'XX' in task:
+        match = re.search(r'-([0-9X]{2})-([0-9X]{2})-([0-9X]{2})-', task)
+        a1, a2, a3 = match.groups() if match else ('', '', '')
+        ata_fmt = f"{a1 if a1!='XX' else ''}_{a2[0] if a2!='XX' else ''}_{a2[1] if a2!='XX' else ''}_{a3 if a3!='XX' else ''}"
+        return f"https://w3.airbus.com/1T40/document/{rev}/toc?itemId=MAINTENANCE%20PROCEDURE&parentId={rev}_{ata_fmt}&itemType=BUSINESS_CATEGORY&wc={wc}"
+    else:
+        match = re.search(r'-([0-9]{2})-([0-9]{2})-([0-9]{2})-', task)
+        a1, a2, a3 = match.groups() if match else ('', '', '')
+        return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{a1}_{a2[0]}_{a2[1]}_{a3}_MAINTENANCE%20PROCEDURE&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&context=document&wc={wc}&viewMinimize=true"
+
+# 3-4. A380 전용 Maximize URL 생성 함수 (FSN:005 고정 로직 적용)
+def generate_a380_maximize_url(task_str, msn_str=""):
+    clean_task = re.sub(r'[^0-9]', '', str(task_str))
+    if len(clean_task) < 12: return None
+        
+    task_12 = clean_task[:12]
+    task_prefix = task_12[:6]
+    
+    revision_id = "763497_SGML_C"
+    item_id = f"{revision_id}_EN{task_12}00"
+    parent_id = f"{revision_id}_EN{task_prefix}040"
+    
+    msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
+    # A380은 Warning 방지를 위해 FSN:005 필수 삽입
+    wc = f"FSN:005;actype:A380;customization:AAR;doctype:AMM;tailNumber:L{msn_clean}"
+    
+    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc}&viewMinimize=true"
+
 
 # 4. FSN 적용 여부 확인 함수 (정밀 필터링)
 def check_effectivity(fsn_str, eff_str):
@@ -218,14 +239,18 @@ else:
                 st.caption(f"Ref: {row['링크 (Reference)']} | 적용: **{row['적용 (Effectivity)']}**")
             with col2:
                 # 기종별 맞춤형 다이렉트 버튼 출력 로직
+                max_url = None
                 if 'A321' in selected_display:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
-                    if max_url:
-                        st.link_button("바로가기 (Maximize)", max_url, type="primary")
                 elif 'A330' in selected_display:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
-                    if max_url:
-                        st.link_button("바로가기 (Maximize)", max_url, type="primary")
+                elif 'A350' in selected_display:
+                    max_url = generate_a350_url(row['링크 (Reference)'], msn_value)
+                elif 'A380' in selected_display:
+                    max_url = generate_a380_maximize_url(row['링크 (Reference)'], msn_value)
+                
+                if max_url:
+                    st.link_button("바로가기 (Maximize)", max_url, type="primary")
                 
                 # 항상 기본으로 나타나는 검색 방식 버튼
                 search_url = get_search_url(row['링크 (Reference)'])
