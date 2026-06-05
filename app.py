@@ -44,7 +44,7 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL 생성 함수 (룰 업데이트 적용)
+# 3-1. A321 전용 Maximize URL 생성 함수 (엔진 분기 및 기번 소트 기능 적용)
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -52,14 +52,21 @@ def generate_a321_maximize_url(task_str, msn_str=""):
     task_12 = clean_task[:12]
     task_prefix = task_12[:6]
     
+    # ATA 챕터가 70 이상(Power Plant)이면 04M, 그 외는 040 노드 할당
+    if int(task_prefix[:2]) >= 70:
+        node_id = "04M"
+    else:
+        node_id = "040"
+    
     revision_id = "773433_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_prefix}040" # 020에서 040으로 업데이트
+    parent_id = f"{revision_id}_EN{task_prefix}{node_id}"
     
+    # 패밀리 기종 식별
     wc_base = "actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;doctype:AMM"
     wc_params = [wc_base]
     
-    # A321은 FSN 생략, N+MSN 조합 적용
+    # A321 특정 호기 소트(Sort) 로직 추가 (N + MSN)
     if msn_str and str(msn_str).upper() != 'NAN':
         try:
             msn_clean = str(int(float(msn_str)))
@@ -85,6 +92,7 @@ def generate_a330_maximize_url(task_str, msn_str=""):
     
     wc_params = ["actype:A330", "customization:AAR", "doctype:AMM"]
     
+    # A330 호기 소트 로직 (F + MSN)
     if msn_str and str(msn_str).upper() != 'NAN':
         try:
             clean_msn = int(float(msn_str)) 
@@ -101,6 +109,7 @@ def generate_a350_url(task_str, msn_str=""):
     task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
     rev = "776735_S1KD_C"
     
+    # A350 호기 소트 로직 (P + MSN)
     msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
     wc = f"actype:A350;customization:AAR;doctype:Line%20Maintenance;tailNumber:P{msn_clean}"
     
@@ -114,7 +123,7 @@ def generate_a350_url(task_str, msn_str=""):
         a1, a2, a3 = match.groups() if match else ('', '', '')
         return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{a1}_{a2[0]}_{a2[1]}_{a3}_MAINTENANCE%20PROCEDURE&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&context=document&wc={wc}&viewMinimize=true"
 
-# 3-4. A380 전용 Maximize URL 생성 함수 (FSN:005 고정 로직 적용)
+# 3-4. A380 전용 Maximize URL 생성 함수 (FSN 고정 및 기번 소트 로직)
 def generate_a380_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -126,6 +135,7 @@ def generate_a380_maximize_url(task_str, msn_str=""):
     item_id = f"{revision_id}_EN{task_12}00"
     parent_id = f"{revision_id}_EN{task_prefix}040"
     
+    # A380 호기 소트 로직 (L + MSN, FSN:005 필수 포함)
     msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
     wc = f"FSN:005;actype:A380;customization:AAR;doctype:AMM;tailNumber:L{msn_clean}"
     
@@ -239,10 +249,9 @@ else:
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']}")
             with col2:
-                # 기종별 맞춤형 URL 분기 로직 (선택된 Tail Number의 데이터 자동 대입)
+                # 기종별 맞춤형 URL 분기 로직 (선택된 Tail Number의 MSN 데이터 자동 대입)
                 max_url = None
                 if 'A321' in selected_display:
-                    # A321 룰 업데이트 적용 (MSN만 대입)
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
                 elif 'A330' in selected_display:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
