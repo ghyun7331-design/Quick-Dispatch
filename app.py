@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 import re
 
+# 1. 페이지 설정
 st.set_page_config(page_title="Airbus Quick Dispatch", layout="wide")
 st.title("✈️ Airbus Quick Dispatch Guide")
 
+# 2. 데이터 로드
 @st.cache_data
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
@@ -13,34 +15,96 @@ def load_data():
 
 db_df, fleet_df = load_data()
 
-# --- 디버그 정보 출력 ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("DEBUG (데이터 확인)")
-# -----------------------
+# 3. URL 자동 생성 함수
+def get_search_url(task_str):
+    clean_id = re.sub(r'[^0-9-]', '', str(task_str))
+    return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
+# 4. FSN 적용 여부 확인 함수 (Effectivity 스마트 파싱)
+def check_effectivity(fsn, eff_str):
+    if pd.isna(eff_str): return True # Effectivity 값이 비어있으면 모든 호기 적용으로 간주
+    eff_str = str(eff_str).upper()
+    if 'ALL' in eff_str: return True # 'ALL'이라고 적혀있으면 무조건 적용
+    
+    fsn_str = str(fsn).strip()
+    if not fsn_str or fsn_str == 'NAN': return True 
+    
+    # 조건 A: 단순 텍스트 포함 여부 (예: '051'이 '051, 052'에 있는지)
+    if fsn_str in eff_str:
+        return True
+    
+    # 조건 B: 범위 형태 (예: 001-050) 안에 FSN이 속해 있는지 계산
+    ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
+    try:
+        fsn_int = int(fsn_str)
+        for start, end in ranges:
+            if int(start) <= fsn_int <= int(end):
+                return True
+    except ValueError:
+        pass # FSN이 숫자가 아닌 문자일 경우 에러 방지
+        
+    return False
+
+# 5. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
-models = fleet_df['A/C Model'].unique()
-selected_model = st.sidebar.selectbox("기종 선택 (Model)", models)
 
-# 데이터 필터링 단계
-filtered_db_by_model = db_df[db_df['기종 (Model)'] == selected_model]
+# [조건 1] 검색 조건: 321, 330, 350, 380 콤보박스 표시
+base_models = ['321', '330', '350', '380']
+selected_base = st.sidebar.selectbox("기종 그룹 (Base Model)", base_models)
 
-# --- 디버그 출력 ---
-st.sidebar.write(f"현재 선택된 기종: {selected_model}")
-st.sidebar.write(f"조회된 작업 개수: {len(filtered_db_by_model)}개")
-st.sidebar.write(f"컬럼 목록: {list(db_df.columns)}")
-# ------------------
+# Fleet DB에서 선택한 기종(예: 321)이 포함된 A/C Model만 걸러서 Tail Number 표시
+filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(selected_base, na=False)]
+tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
 
-tail_numbers = fleet_df[fleet_df['A/C Model'] == selected_model]['Tail Number (등록기호)'].unique()
+if len(tail_numbers) == 0:
+    st.warning(f"데이터베이스에 {selected_base} 기종에 해당하는 Tail Number가 없습니다.")
+    st.stop()
+
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 항목(Section) 필터
-if '항목 (Section)' in db_df.columns:
-    sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
-    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
-else:
-    st.sidebar.error("CSV에 '항목 (Section)' 컬럼이 없습니다!")
-    selected_section = '전체 (All)'
+# 6. FSN 매칭 로직 (조건 2 반영)
+# 선택한 Tail Number의 FSN 값을 Fleet DB에서 가져옴
+fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'] == selected_tail]['FSN'].values[0]
+st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
-# (이후 코드는 동일하므로 생략 - 그대로 두셔도 됩니다)
-# [이미 작성하신 나머지 코드를 이 아래에 그대로 붙이시면 됩니다]
+# Dispatch DB 1차 필터: 선택한 Base Model(321, 330 등)이 포함된 작업만
+filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(selected_base, na=False)]
+
+# Dispatch DB 2차 필터: Effectivity 컬럼에 FSN이 적용되는 작업만 남김
+filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
+
+# 7. 항목(Section) 필터링
+if '항목 (Section)' in filtered_db_by_eff.columns and not filtered_db_by_eff.empty:
+    sections = ['전체 (All)'] + filtered_db_by_eff['항목 (Section)'].unique().tolist()
+    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
+    
+    if selected_section != '전체 (All)':
+        final_filtered_db = filtered_db_by_eff[filtered_db_by_eff['항목 (Section)'] == selected_section]
+    else:
+        final_filtered_db = filtered_db_by_eff
+else:
+    final_filtered_db = filtered_db_by_eff
+
+# 8. 메인 화면 출력
+st.subheader(f"작업 리스트: {selected_tail} (FSN: {fsn_value})")
+
+if final_filtered_db.empty:
+    st.warning("선택하신 호기(FSN)에 해당하는 적용(Effectivity) 작업이 없습니다.")
+else:
+    for _, row in final_filtered_db.iterrows():
+        with st.container(border=True):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
+                st.caption(f"Ref: {row['링크 (Reference)']} | 적용: **{row['적용 (Effectivity)']}**")
+            with col2:
+                search_url = get_search_url(row['링크 (Reference)'])
+                st.link_button("매뉴얼 검색", search_url)
+
+# 9. 데이터 전체 검색 기능
+st.markdown("---")
+st.subheader("데이터베이스 전체 검색")
+search_query = st.text_input("검색어를 입력하세요 (예: Door, Leak 등)")
+if search_query:
+    result = final_filtered_db[final_filtered_db['작업 (Task Description)'].str.contains(search_query, case=False, na=False)]
+    st.dataframe(result, use_container_width=True)
