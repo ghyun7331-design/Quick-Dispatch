@@ -35,7 +35,7 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 4. FSN 적용 여부 확인 함수
+# 4. FSN 적용 여부 확인 함수 (Effectivity 스마트 필터링)
 def check_effectivity(fsn, eff_str):
     if pd.isna(eff_str): return True 
     eff_str = str(eff_str).upper()
@@ -44,9 +44,11 @@ def check_effectivity(fsn, eff_str):
     fsn_str = str(fsn).strip()
     if not fsn_str or fsn_str == 'NAN': return True 
     
+    # 단순 포함 여부 확인
     if fsn_str in eff_str:
         return True
     
+    # 범위(001-050 등) 확인
     ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
     try:
         fsn_int = int(fsn_str)
@@ -61,8 +63,8 @@ def check_effectivity(fsn, eff_str):
 # 5. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
 
-# [수정됨] 화면 표시용(A321)과 검색용(321) 분리 로직
-display_models = ['A321', 'A330', 'A350', 'A380']
+# [업데이트] A320 포함 및 화면 표시(A321)와 검색(321) 분리
+display_models = ['A320', 'A321', 'A330', 'A350', 'A380']
 selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models)
 
 # DB 검색을 위해 선택된 값에서 'A'를 제거 (예: 'A321' -> '321')
@@ -82,6 +84,7 @@ selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'] == selected_tail]['FSN'].values[0]
 st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
+# Dispatch DB 1, 2차 필터링
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(selected_base, na=False)]
 filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
 
