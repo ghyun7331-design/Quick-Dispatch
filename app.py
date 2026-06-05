@@ -29,22 +29,22 @@ def clean_tail_number(val):
     match = re.search(r'(HL\d{4})', str(val))
     return match.group(1) if match else str(val)
 
-@st.cache_data(ttl=0) # 캐시 우회(항상 최신)
+@st.cache_data(ttl=0) # 항상 최신 데이터 로드
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
-    # 기번 데이터 정제 (소팅 오류 방지)
+    # 기번 데이터 정제
     fleet['Tail Number (등록기호)'] = fleet['Tail Number (등록기호)'].apply(clean_tail_number)
     return db, fleet
 
 db_df, fleet_df = load_data()
 
-# 3. URL 자동 생성 함수 (기존 검색 방식)
+# 3. URL 자동 생성 함수 (공통 검색 방식)
 def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL 생성 함수 (A320 Family 통합)
+# 3-1. A321 전용 Maximize URL 생성 함수
 def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -72,7 +72,7 @@ def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
 
 # 3-2. A330 전용 Maximize URL 생성 함수
-def generate_a330_maximize_url(task_str, fsn_str="", msn_str=""):
+def generate_a330_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
@@ -96,7 +96,7 @@ def generate_a330_maximize_url(task_str, fsn_str="", msn_str=""):
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
 
-# 3-3. A350 전용 URL 생성 함수 (S1000D 체계 / XX 와일드카드 TOC 전환 로직)
+# 3-3. A350 전용 URL 생성 함수 (S1000D 체계 / XX 와일드카드 대응)
 def generate_a350_url(task_str, msn_str=""):
     task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
     rev = "776735_S1KD_C"
@@ -104,7 +104,6 @@ def generate_a350_url(task_str, msn_str=""):
     msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
     wc = f"actype:A350;customization:AAR;doctype:Line%20Maintenance;tailNumber:P{msn_clean}"
     
-    # XX가 포함된 범용 작업은 TOC 뷰어로 우회
     if 'XX' in task:
         match = re.search(r'-([0-9X]{2})-([0-9X]{2})-([0-9X]{2})-', task)
         a1, a2, a3 = match.groups() if match else ('', '', '')
@@ -128,38 +127,12 @@ def generate_a380_maximize_url(task_str, msn_str=""):
     parent_id = f"{revision_id}_EN{task_prefix}040"
     
     msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
-    # A380은 Warning 방지를 위해 FSN:005 필수 삽입
     wc = f"FSN:005;actype:A380;customization:AAR;doctype:AMM;tailNumber:L{msn_clean}"
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc}&viewMinimize=true"
 
 
-# 4. FSN 적용 여부 확인 함수 (정밀 필터링)
-def check_effectivity(fsn_str, eff_str):
-    if pd.isna(eff_str): return True 
-    eff_str = str(eff_str).upper()
-    if 'ALL' in eff_str: return True 
-    
-    if not fsn_str or fsn_str == 'NAN': return True 
-    
-    ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
-    singles = re.findall(r'\b(\d+)\b', eff_str)
-    
-    try:
-        fsn_int = int(fsn_str)
-        for start, end in ranges:
-            if int(start) <= fsn_int <= int(end):
-                return True
-        for s in singles:
-            if int(s) == fsn_int:
-                return True
-    except ValueError:
-        if fsn_str in eff_str:
-            return True
-            
-    return False
-
-# 5. 사이드바 필터 설정
+# 4. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
 
 display_models = ['A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
@@ -176,8 +149,8 @@ elif 'A380' in selected_display:
 else:
     search_pattern = ''
 
+# 기종에 맞는 Tail Number 리스트업
 filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
-
 raw_tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
 tail_numbers = sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
 
@@ -187,14 +160,16 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 6. FSN 및 MSN 매칭 및 전처리 로직
+# 5. 선택된 기번의 FSN 및 MSN 추출 (URL 생성을 위한 백그라운드 데이터)
 tail_data = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]
-raw_fsn = tail_data['FSN'].values[0]
 
-try:
-    fsn_value = str(int(float(raw_fsn))).zfill(3)
-except:
-    fsn_value = str(raw_fsn).strip()
+fsn_value = ""
+if 'FSN' in tail_data.columns:
+    raw_fsn = tail_data['FSN'].values[0]
+    try:
+        fsn_value = str(int(float(raw_fsn))).zfill(3)
+    except:
+        fsn_value = str(raw_fsn).strip()
 
 msn_value = ""
 if 'MSN' in tail_data.columns:
@@ -204,46 +179,43 @@ if 'MSN' in tail_data.columns:
     except:
         msn_value = str(raw_msn).strip()
 
-if msn_value:
-    st.sidebar.info(f"✈️ 선택된 호기\nFSN: **{fsn_value}** | MSN: **{msn_value}**")
-else:
-    st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
+st.sidebar.info(f"✈️ 시스템 내부 식별\nMSN: **{msn_value}** | FSN: **{fsn_value}**")
 
-# Dispatch DB 로드 및 필터링
+# 6. DB 필터링 (Effectivity 제거 -> 오직 "기종(Model)" 기준으로만 필터링)
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
-filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
 
-# 7. 항목(Section) 필터링
-if '항목 (Section)' in filtered_db_by_eff.columns and not filtered_db_by_eff.empty:
-    sections = ['전체 (All)'] + filtered_db_by_eff['항목 (Section)'].unique().tolist()
+# 7. 항목(Section) 필터링 (UI 편의성)
+if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
+    sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
     selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
     
     if selected_section != '전체 (All)':
-        final_filtered_db = filtered_db_by_eff[filtered_db_by_eff['항목 (Section)'] == selected_section]
+        final_filtered_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section]
     else:
-        final_filtered_db = filtered_db_by_eff
+        final_filtered_db = filtered_db_by_model
 else:
-    final_filtered_db = filtered_db_by_eff
+    final_filtered_db = filtered_db_by_model
 
 # 8. 메인 화면 출력
 st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
-    st.warning("선택하신 호기(FSN)에 해당하는 적용(Effectivity) 작업이 없습니다.")
+    st.warning("해당 기종에 등록된 작업 데이터가 없습니다.")
 else:
     for _, row in final_filtered_db.iterrows():
         with st.container(border=True):
             col1, col2 = st.columns([4, 1])
             with col1:
+                # Effectivity 관련 텍스트 출력 제거됨
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
-                st.caption(f"Ref: {row['링크 (Reference)']} | 적용: **{row['적용 (Effectivity)']}**")
+                st.caption(f"Ref: {row['링크 (Reference)']}")
             with col2:
-                # 기종별 맞춤형 다이렉트 버튼 출력 로직
+                # 기종별 맞춤형 URL 분기 로직 (선택된 Tail Number의 데이터 자동 대입)
                 max_url = None
                 if 'A321' in selected_display:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
                 elif 'A330' in selected_display:
-                    max_url = generate_a330_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
+                    max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
                 elif 'A350' in selected_display:
                     max_url = generate_a350_url(row['링크 (Reference)'], msn_value)
                 elif 'A380' in selected_display:
@@ -252,7 +224,7 @@ else:
                 if max_url:
                     st.link_button("바로가기 (Maximize)", max_url, type="primary")
                 
-                # 항상 기본으로 나타나는 검색 방식 버튼
+                # 항상 기본으로 나타나는 범용 검색 버튼
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
 
