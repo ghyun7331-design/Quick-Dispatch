@@ -14,13 +14,17 @@ st.markdown(
         font-weight: bold;
         padding-bottom: 20px;
     }
+    /* 버튼 상하 간격 조절 */
+    div.stButton > button {
+        margin-bottom: 5px;
+    }
     </style>
     <div class="responsive-title">✈️ Airbus Quick Dispatch Guide</div>
     """,
     unsafe_allow_html=True
 )
 
-# 2. [수정됨] 데이터 로드 (캐시 제거 - 항상 최신 GitHub 데이터를 읽어옵니다)
+# 2. 데이터 로드 (캐시 제거 - 항상 최신 GitHub 데이터를 읽어옵니다)
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
@@ -28,10 +32,50 @@ def load_data():
 
 db_df, fleet_df = load_data()
 
-# 3. URL 자동 생성 함수
+# 3. URL 자동 생성 함수 (기존 검색 방식)
 def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
+
+# 3-1. [신규] A321 전용 Maximize URL 생성 함수
+def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
+    clean_task = re.sub(r'[^0-9]', '', str(task_str))
+    if len(clean_task) < 12: 
+        return None
+        
+    task_12 = clean_task[:12]
+    task_prefix = task_12[:6]
+    
+    revision_id = "773433_SGML_C"
+    item_id = f"{revision_id}_EN{task_12}00"
+    parent_id = f"{revision_id}_EN{task_prefix}020"
+    
+    wc_base = "actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;doctype:AMM"
+    wc_params = []
+    
+    if fsn_str and str(fsn_str).upper() != 'NAN':
+        wc_params.append(f"FSN:{fsn_str}")
+        
+    wc_params.append(wc_base)
+    
+    # MSN 값이 DB에 있을 경우 tailNumber 필터 추가
+    if msn_str and str(msn_str).upper() != 'NAN':
+        wc_params.append(f"tailNumber:N{msn_str}")
+        
+    wc_final = ";".join(wc_params)
+    
+    url = (
+        f"https://w3.airbus.com/1T40/maximize"
+        f"?itemId={item_id}"
+        f"&parentId={parent_id}"
+        f"&itemType=DATAMODULE"
+        f"&itemFormat=HTML"
+        f"&revisionItemId={revision_id}"
+        f"&context=document"
+        f"&wc={wc_final}"
+        f"&viewMinimize=true"
+    )
+    return url
 
 # 4. FSN 적용 여부 확인 함수 (정밀 필터링)
 def check_effectivity(fsn_str, eff_str):
@@ -86,15 +130,28 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 6. FSN 매칭 및 전처리 로직
-raw_fsn = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]['FSN'].values[0]
+# 6. FSN 및 MSN 매칭 및 전처리 로직
+tail_data = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]
+raw_fsn = tail_data['FSN'].values[0]
 
 try:
     fsn_value = str(int(float(raw_fsn))).zfill(3)
 except:
     fsn_value = str(raw_fsn).strip()
 
-st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
+# MSN 데이터 추출 (Fleet Mapping DB에 'MSN' 컬럼이 있는 경우 자동 인식)
+msn_value = ""
+if 'MSN' in tail_data.columns:
+    raw_msn = tail_data['MSN'].values[0]
+    try:
+        msn_value = str(int(float(raw_msn)))
+    except:
+        msn_value = str(raw_msn).strip()
+
+if msn_value:
+    st.sidebar.info(f"✈️ 선택된 호기\nFSN: **{fsn_value}** | MSN: **{msn_value}**")
+else:
+    st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
 # Dispatch DB 로드 및 필터링
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
@@ -113,7 +170,7 @@ else:
     final_filtered_db = filtered_db_by_eff
 
 # 8. 메인 화면 출력
-st.subheader(f"작업 리스트: {selected_tail} (FSN: {fsn_value})")
+st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
     st.warning("선택하신 호기(FSN)에 해당하는 적용(Effectivity) 작업이 없습니다.")
@@ -125,8 +182,15 @@ else:
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']} | 적용: **{row['적용 (Effectivity)']}**")
             with col2:
+                # A321인 경우 [바로가기] 버튼 추가 표시
+                if 'A321' in selected_display:
+                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
+                    if max_url:
+                        st.link_button("바로가기 (Maximize)", max_url, type="primary")
+                
+                # 기본 [검색으로 열기] 버튼
                 search_url = get_search_url(row['링크 (Reference)'])
-                st.link_button("매뉴얼 검색", search_url)
+                st.link_button("검색으로 열기 (Search)", search_url)
 
 # 9. 데이터 전체 검색 기능
 st.markdown("---")
