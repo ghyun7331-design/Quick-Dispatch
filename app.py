@@ -40,34 +40,19 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (룰 추출 및 FSN 소트 적용)
+# 3-1. A321 전용 Maximize URL (dataModule 방식 적용)
 def generate_a321_maximize_url(task_str, msn_str="", fsn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
-    task_prefix = task_12[:6]
     
-    # 룰 1: 엔진(ATA 70 이상)은 04M, 그 외 기체 계통은 040 노드 적용
-    if int(task_prefix[:2]) >= 70:
-        node_id = "04M"
-    else:
-        node_id = "040"
-        
     revision_id = "773433_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_prefix}{node_id}" 
+    parent_id = f"{revision_id}_EN{task_12}" # 다이렉트 부모 노드 지정
     
-    wc_params = []
+    wc_params = ["actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR"]
     
-    # 룰 2: FSN 소트 강제 삽입 (요청 사항)
-    if fsn_str and str(fsn_str).upper() != 'NAN':
-        wc_params.append(f"FSN:{fsn_str}")
-        
-    # 룰 3: 추출된 패밀리 코드 및 doctype:AMM 유지
-    wc_params.append("actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;doctype:AMM")
-    
-    # 룰 4: 추출된 기번(Tail Number) N + MSN 소트
     if msn_str and str(msn_str).upper() != 'NAN':
         try:
             msn_clean = str(int(float(msn_str)))
@@ -77,8 +62,8 @@ def generate_a321_maximize_url(task_str, msn_str="", fsn_str=""):
             
     wc_final = ";".join(wc_params)
     
-    # 룰 5: context=document 복구 적용
-    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
+    # context=dataModule 적용
+    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
 # 3-2. A330 전용 Maximize URL
 def generate_a330_maximize_url(task_str, msn_str=""):
@@ -235,7 +220,6 @@ else:
             with col2:
                 max_url = None
                 if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
-                    # A321의 경우 fsn_value 인자를 함께 넘겨 룰 반영
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value, fsn_value)
                 elif '330' in db_model_str:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
