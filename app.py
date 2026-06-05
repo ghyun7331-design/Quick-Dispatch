@@ -24,7 +24,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 2. 데이터 로드 (캐시 제거 - 항상 최신 GitHub 데이터를 읽어옵니다)
+# 2. 데이터 로드 (캐시 제거 - 항상 최신 데이터를 읽어옴)
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
@@ -37,7 +37,7 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. [신규] A321 전용 Maximize URL 생성 함수
+# 3-1. A321 전용 Maximize URL 생성 함수
 def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: 
@@ -58,10 +58,46 @@ def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
         
     wc_params.append(wc_base)
     
-    # MSN 값이 DB에 있을 경우 tailNumber 필터 추가
     if msn_str and str(msn_str).upper() != 'NAN':
         wc_params.append(f"tailNumber:N{msn_str}")
         
+    wc_final = ";".join(wc_params)
+    
+    url = (
+        f"https://w3.airbus.com/1T40/maximize"
+        f"?itemId={item_id}"
+        f"&parentId={parent_id}"
+        f"&itemType=DATAMODULE"
+        f"&itemFormat=HTML"
+        f"&revisionItemId={revision_id}"
+        f"&context=document"
+        f"&wc={wc_final}"
+        f"&viewMinimize=true"
+    )
+    return url
+
+# 3-2. A330 전용 Maximize URL 생성 함수
+def generate_a330_maximize_url(task_str, fsn_str="", msn_str=""):
+    clean_task = re.sub(r'[^0-9]', '', str(task_str))
+    if len(clean_task) < 12: 
+        return None
+        
+    task_12 = clean_task[:12]
+    task_prefix = task_12[:6]
+    
+    revision_id = "768908_SGML_C"
+    item_id = f"{revision_id}_EN{task_12}00"
+    parent_id = f"{revision_id}_EN{task_prefix}040" # A330 룰 적용
+    
+    wc_params = ["actype:A330", "customization:AAR", "doctype:AMM"]
+    
+    if msn_str and str(msn_str).upper() != 'NAN':
+        try:
+            clean_msn = int(float(msn_str)) 
+            wc_params.append(f"tailNumber:F{clean_msn}")
+        except:
+            pass
+            
     wc_final = ";".join(wc_params)
     
     url = (
@@ -139,7 +175,6 @@ try:
 except:
     fsn_value = str(raw_fsn).strip()
 
-# MSN 데이터 추출 (Fleet Mapping DB에 'MSN' 컬럼이 있는 경우 자동 인식)
 msn_value = ""
 if 'MSN' in tail_data.columns:
     raw_msn = tail_data['MSN'].values[0]
@@ -182,13 +217,17 @@ else:
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']} | 적용: **{row['적용 (Effectivity)']}**")
             with col2:
-                # A321인 경우 [바로가기] 버튼 추가 표시
+                # 기종별 맞춤형 다이렉트 버튼 출력 로직
                 if 'A321' in selected_display:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
                     if max_url:
                         st.link_button("바로가기 (Maximize)", max_url, type="primary")
+                elif 'A330' in selected_display:
+                    max_url = generate_a330_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
+                    if max_url:
+                        st.link_button("바로가기 (Maximize)", max_url, type="primary")
                 
-                # 기본 [검색으로 열기] 버튼
+                # 항상 기본으로 나타나는 검색 방식 버튼
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
 
