@@ -40,17 +40,17 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (요청하신 정확한 URL 템플릿 강제 적용)
+# 3-1. A321 전용 Maximize URL (분석된 단일 데이터 모듈 룰 완벽 적용)
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
     
-    # MSN 추출 실패 시 시스템 에러를 막기 위한 폴백
+    # MSN 식별 (누락 시 시스템 에러 방지용 폴백)
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     
-    # 전달해주신 URL 구조를 100% 동일하게 하드코딩하여 누락 가능성을 원천 차단했습니다.
+    # 제시해주신 3개의 URL 패턴과 100% 일치하도록 템플릿 하드코딩
     url = (
         f"https://w3.airbus.com/1T40/maximize?"
         f"itemId=773433_SGML_C_EN{task_12}00"
