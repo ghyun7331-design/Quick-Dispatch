@@ -40,7 +40,7 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (1번 방식 - Fleet DB 참조)
+# 3-1. A321 전용 Maximize URL
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -55,7 +55,7 @@ def generate_a321_maximize_url(task_str, msn_str=""):
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-2. A330 전용 Maximize URL (1번 방식)
+# 3-2. A330 전용 Maximize URL
 def generate_a330_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -70,7 +70,7 @@ def generate_a330_maximize_url(task_str, msn_str=""):
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-3. A350 전용 URL (1번 방식)
+# 3-3. A350 전용 URL
 def generate_a350_url(task_str, msn_str=""):
     task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
     rev = "776735_S1KD_C"
@@ -86,7 +86,7 @@ def generate_a350_url(task_str, msn_str=""):
     else:
         return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{task}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-4. A380 전용 Maximize URL (1번 방식)
+# 3-4. A380 전용 Maximize URL
 def generate_a380_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
@@ -130,15 +130,10 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# =========================================================================
-# 5. [핵심 업데이트] Fleet Mapping DB에서 선택된 기번의 모든 제원 완벽 참조
-# =========================================================================
+# 5. Fleet Mapping DB 정보 파싱
 tail_data_row = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail].iloc[0]
-
-# DB 기종(Model) 텍스트 참조
 db_model_str = str(tail_data_row.get('A/C Model', '')).upper()
 
-# FSN 식별
 fsn_value = ""
 fsn_cols = [col for col in tail_data_row.index if 'FSN' in str(col).upper()]
 if fsn_cols:
@@ -146,7 +141,6 @@ if fsn_cols:
     if pd.notna(raw_fsn) and str(raw_fsn).strip().upper() != 'NAN':
         fsn_value = re.sub(r'[^0-9]', '', str(raw_fsn)).zfill(3)
 
-# MSN 식별 (가장 중요)
 msn_value = ""
 msn_cols = [col for col in tail_data_row.index if 'MSN' in str(col).upper()]
 if msn_cols:
@@ -154,50 +148,55 @@ if msn_cols:
     if pd.notna(raw_msn) and str(raw_msn).strip().upper() != 'NAN':
         msn_value = re.sub(r'[^0-9]', '', str(raw_msn))
 
-# 상태창에 Fleet DB 파싱 결과 표기
 if not msn_value:
     st.sidebar.error("⚠️ Fleet DB에 MSN 데이터가 누락되었습니다.")
 else:
     st.sidebar.info(f"✈️ Fleet DB 식별 정보\n**Model:** {db_model_str}\n**MSN:** {msn_value} | **FSN:** {fsn_value}")
 
+# 6. 기본 DB 기종 필터링
+filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
 
-# 6. Dispatch DB 필터링
-filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
-
-# 7. 계층적 콤보박스 (Section -> ATA -> Task)
+# =========================================================================
+# 7. [수정됨] 독립적인 콤보박스 (종속 제한 삭제)
+# =========================================================================
 if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
-    sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
-    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
     
-    if selected_section != '전체 (All)':
-        step1_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section].copy()
-    else:
-        step1_db = filtered_db_by_model.copy()
-        
+    # 콤보박스에 들어갈 전체 옵션 목록을 미리 생성 (선택에 의해 줄어들지 않음)
+    sections_options = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
+    
     def extract_ata_prefix(ref_str):
         match = re.search(r'(\d{2}-\d{2})', str(ref_str))
         return match.group(1) if match else "미분류"
         
-    step1_db['ATA_Prefix'] = step1_db['링크 (Reference)'].apply(extract_ata_prefix)
-    ata_options = sorted([ata for ata in step1_db['ATA_Prefix'].unique() if ata != "미분류"])
+    filtered_db_by_model['ATA_Prefix'] = filtered_db_by_model['링크 (Reference)'].apply(extract_ata_prefix)
+    ata_options = sorted([ata for ata in filtered_db_by_model['ATA_Prefix'].unique() if ata != "미분류"])
     
+    if '작업 (Task Description)' in filtered_db_by_model.columns:
+        task_options = filtered_db_by_model['작업 (Task Description)'].unique().tolist()
+    else:
+        task_options = []
+
+    # 화면에 콤보박스 3개 배치 (항상 전체 목록 제공)
+    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options)
     selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
     
-    if selected_ata != '전체 (All)':
-        step2_db = step1_db[step1_db['ATA_Prefix'] == selected_ata].copy()
-    else:
-        step2_db = step1_db.copy()
-
-    if '작업 (Task Description)' in step2_db.columns:
-        task_options = step2_db['작업 (Task Description)'].unique().tolist()
+    if task_options:
         selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options)
-        
-        if selected_task != '전체 (All)':
-            final_filtered_db = step2_db[step2_db['작업 (Task Description)'] == selected_task]
-        else:
-            final_filtered_db = step2_db
     else:
-        final_filtered_db = step2_db
+        selected_task = '전체 (All)'
+
+    # 사용자가 선택한 각각의 조건을 독립적으로 필터링 적용
+    final_filtered_db = filtered_db_by_model.copy()
+    
+    if selected_section != '전체 (All)':
+        final_filtered_db = final_filtered_db[final_filtered_db['항목 (Section)'] == selected_section]
+        
+    if selected_ata != '전체 (All)':
+        final_filtered_db = final_filtered_db[final_filtered_db['ATA_Prefix'] == selected_ata]
+        
+    if selected_task != '전체 (All)':
+        final_filtered_db = final_filtered_db[final_filtered_db['작업 (Task Description)'] == selected_task]
+
 else:
     final_filtered_db = filtered_db_by_model
 
@@ -205,7 +204,7 @@ else:
 st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
-    st.warning("해당 조건에 부합하는 작업 데이터가 없습니다.")
+    st.warning("선택하신 조합에 부합하는 작업 데이터가 없습니다.")
 else:
     for _, row in final_filtered_db.iterrows():
         with st.container(border=True):
@@ -214,7 +213,6 @@ else:
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']}")
             with col2:
-                # Fleet DB에서 파악된 실제 기종(db_model_str)을 기반으로 정확한 URL 함수 호출
                 max_url = None
                 if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
