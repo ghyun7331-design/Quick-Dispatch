@@ -14,10 +14,7 @@ st.markdown(
         font-weight: bold;
         padding-bottom: 20px;
     }
-    /* 버튼 상하 간격 조절 */
-    div.stButton > button {
-        margin-bottom: 5px;
-    }
+    div.stButton > button { margin-bottom: 5px; }
     </style>
     <div class="responsive-title">✈️ Airbus Quick Dispatch Guide</div>
     """,
@@ -38,33 +35,23 @@ def load_data():
 
 db_df, fleet_df = load_data()
 
-# 3. URL 자동 생성 함수 (공통 검색 방식)
+# 3. URL 자동 생성 함수 (공통 검색)
 def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (1번 방식: tailNumber 포함, dataModule)
+# 3-1. A321 전용 Maximize URL (1번 방식 - Fleet DB 참조)
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
-    
     revision_id = "773433_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_12}" # 다이렉트 Parent 지정
+    parent_id = f"{revision_id}_EN{task_12}" 
     
-    wc_params = ["actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR"]
-    
-    # 1번 방식: tailNumber 필수 포함
-    if msn_str and str(msn_str).upper() != 'NAN':
-        try:
-            msn_clean = str(int(float(msn_str)))
-            wc_params.append(f"tailNumber:N{msn_clean}")
-        except:
-            pass
-        
-    wc_final = ";".join(wc_params)
+    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
+    wc_final = f"actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;tailNumber:N{msn_clean}"
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
@@ -74,41 +61,30 @@ def generate_a330_maximize_url(task_str, msn_str=""):
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
-    
     revision_id = "768908_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
     parent_id = f"{revision_id}_EN{task_12}" 
     
-    wc_params = ["actype:A330;customization:AAR"]
-    
-    if msn_str and str(msn_str).upper() != 'NAN':
-        try:
-            clean_msn = int(float(msn_str)) 
-            wc_params.append(f"tailNumber:F{clean_msn}")
-        except:
-            pass
-            
-    wc_final = ";".join(wc_params)
+    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
+    wc_final = f"actype:A330;customization:AAR;tailNumber:F{msn_clean}"
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-3. A350 전용 URL (1번 방식 / XX 와일드카드 유지)
+# 3-3. A350 전용 URL (1번 방식)
 def generate_a350_url(task_str, msn_str=""):
     task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
     rev = "776735_S1KD_C"
     
-    msn_clean = str(int(float(msn_str))) if msn_str and str(msn_str).upper() != 'NAN' else ""
-    wc = f"actype:A350;customization:AAR"
-    if msn_clean:
-        wc += f";tailNumber:P{msn_clean}"
+    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
+    wc_final = f"actype:A350;customization:AAR;tailNumber:P{msn_clean}"
     
     if 'XX' in task:
         match = re.search(r'-([0-9X]{2})-([0-9X]{2})-([0-9X]{2})-', task)
         a1, a2, a3 = match.groups() if match else ('', '', '')
         ata_fmt = f"{a1 if a1!='XX' else ''}_{a2[0] if a2!='XX' else ''}_{a2[1] if a2!='XX' else ''}_{a3 if a3!='XX' else ''}"
-        return f"https://w3.airbus.com/1T40/document/{rev}/toc?itemId=MAINTENANCE%20PROCEDURE&parentId={rev}_{ata_fmt}&itemType=BUSINESS_CATEGORY&wc={wc}"
+        return f"https://w3.airbus.com/1T40/document/{rev}/toc?itemId=MAINTENANCE%20PROCEDURE&parentId={rev}_{ata_fmt}&itemType=BUSINESS_CATEGORY&wc={wc_final}"
     else:
-        return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{task}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&wc={wc}&context=dataModule&viewMinimize=true"
+        return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{task}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
 # 3-4. A380 전용 Maximize URL (1번 방식)
 def generate_a380_maximize_url(task_str, msn_str=""):
@@ -116,21 +92,12 @@ def generate_a380_maximize_url(task_str, msn_str=""):
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
-    
     revision_id = "763497_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
     parent_id = f"{revision_id}_EN{task_12}" 
     
-    wc_params = ["actype:A380;customization:AAR"]
-    
-    if msn_str and str(msn_str).upper() != 'NAN':
-        try:
-            msn_clean = str(int(float(msn_str)))
-            wc_params.append(f"tailNumber:L{msn_clean}")
-        except:
-            pass
-            
-    wc_final = ";".join(wc_params)
+    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
+    wc_final = f"FSN:005;actype:A380;customization:AAR;tailNumber:L{msn_clean}"
     
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
@@ -152,7 +119,7 @@ elif 'A380' in selected_display:
 else:
     search_pattern = ''
 
-# 기종에 맞는 Tail Number 리스트업
+# Fleet DB에서 기종에 맞는 Tail Number 목록 로드
 filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 raw_tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
 tail_numbers = sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
@@ -163,31 +130,41 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 5. 선택된 기번의 FSN 및 MSN 추출 (URL 생성을 위한 백그라운드 데이터)
-tail_data = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]
+# =========================================================================
+# 5. [핵심 업데이트] Fleet Mapping DB에서 선택된 기번의 모든 제원 완벽 참조
+# =========================================================================
+tail_data_row = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail].iloc[0]
 
+# DB 기종(Model) 텍스트 참조
+db_model_str = str(tail_data_row.get('A/C Model', '')).upper()
+
+# FSN 식별
 fsn_value = ""
-if 'FSN' in tail_data.columns:
-    raw_fsn = tail_data['FSN'].values[0]
-    try:
-        fsn_value = str(int(float(raw_fsn))).zfill(3)
-    except:
-        fsn_value = str(raw_fsn).strip()
+fsn_cols = [col for col in tail_data_row.index if 'FSN' in str(col).upper()]
+if fsn_cols:
+    raw_fsn = tail_data_row[fsn_cols[0]]
+    if pd.notna(raw_fsn) and str(raw_fsn).strip().upper() != 'NAN':
+        fsn_value = re.sub(r'[^0-9]', '', str(raw_fsn)).zfill(3)
 
+# MSN 식별 (가장 중요)
 msn_value = ""
-if 'MSN' in tail_data.columns:
-    raw_msn = tail_data['MSN'].values[0]
-    try:
-        msn_value = str(int(float(raw_msn)))
-    except:
-        msn_value = str(raw_msn).strip()
+msn_cols = [col for col in tail_data_row.index if 'MSN' in str(col).upper()]
+if msn_cols:
+    raw_msn = tail_data_row[msn_cols[0]]
+    if pd.notna(raw_msn) and str(raw_msn).strip().upper() != 'NAN':
+        msn_value = re.sub(r'[^0-9]', '', str(raw_msn))
 
-st.sidebar.info(f"✈️ 시스템 내부 식별\nMSN: **{msn_value}** | FSN: **{fsn_value}**")
+# 상태창에 Fleet DB 파싱 결과 표기
+if not msn_value:
+    st.sidebar.error("⚠️ Fleet DB에 MSN 데이터가 누락되었습니다.")
+else:
+    st.sidebar.info(f"✈️ Fleet DB 식별 정보\n**Model:** {db_model_str}\n**MSN:** {msn_value} | **FSN:** {fsn_value}")
 
-# 6. DB 필터링 (기종 기준)
+
+# 6. Dispatch DB 필터링
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 
-# 7. 계층적 필터링 (Section -> ATA -> Task)
+# 7. 계층적 콤보박스 (Section -> ATA -> Task)
 if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
     sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
     selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
@@ -221,11 +198,10 @@ if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_mod
             final_filtered_db = step2_db
     else:
         final_filtered_db = step2_db
-
 else:
     final_filtered_db = filtered_db_by_model
 
-# 8. 메인 화면 출력
+# 8. 메인 화면 리스트 출력
 st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
@@ -238,15 +214,15 @@ else:
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']}")
             with col2:
-                # 1번 방식이 적용된 URL 할당
+                # Fleet DB에서 파악된 실제 기종(db_model_str)을 기반으로 정확한 URL 함수 호출
                 max_url = None
-                if 'A321' in selected_display:
+                if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
-                elif 'A330' in selected_display:
+                elif '330' in db_model_str:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
-                elif 'A350' in selected_display:
+                elif '350' in db_model_str:
                     max_url = generate_a350_url(row['링크 (Reference)'], msn_value)
-                elif 'A380' in selected_display:
+                elif '380' in db_model_str:
                     max_url = generate_a380_maximize_url(row['링크 (Reference)'], msn_value)
                 
                 if max_url:
@@ -255,7 +231,7 @@ else:
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
 
-# 9. 데이터 전체 검색 기능
+# 9. 데이터 전체 검색
 st.markdown("---")
 st.subheader("데이터베이스 전체 검색")
 search_query = st.text_input("검색어를 입력하세요 (예: Door, Leak 등)")
