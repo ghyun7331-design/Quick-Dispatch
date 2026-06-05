@@ -5,7 +5,6 @@ import re
 # 1. 페이지 설정 (모바일 최적화 및 전체 너비 사용)
 st.set_page_config(page_title="Airbus Quick Dispatch", layout="wide")
 
-# 1-1. 제목을 무조건 한 줄로 표시하고 화면에 맞춰 자동 축소하는 CSS 설정
 st.markdown(
     """
     <style>
@@ -35,41 +34,42 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 4. FSN 적용 여부 확인 함수 (Effectivity 스마트 필터링)
-def check_effectivity(fsn, eff_str):
+# 4. [강화됨] FSN 적용 여부 확인 함수 (정밀 필터링)
+def check_effectivity(fsn_str, eff_str):
     if pd.isna(eff_str): return True 
     eff_str = str(eff_str).upper()
     if 'ALL' in eff_str: return True 
     
-    fsn_str = str(fsn).strip()
     if not fsn_str or fsn_str == 'NAN': return True 
     
-    # 단순 포함 여부 확인
-    if fsn_str in eff_str:
-        return True
-    
-    # 범위(001-050 등) 확인
+    # 정비 데이터의 무결성을 위해 정규식으로 범위와 개별 숫자를 완벽히 분리
     ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
+    singles = re.findall(r'\b(\d+)\b', eff_str)
+    
     try:
         fsn_int = int(fsn_str)
+        # 1. 범위 (예: 054-099) 안에 들어가는지 철저히 확인
         for start, end in ranges:
             if int(start) <= fsn_int <= int(end):
                 return True
+        # 2. 콤마로 구분된 개별 숫자 (예: 151)와 정확히 일치하는지 확인
+        for s in singles:
+            if int(s) == fsn_int:
+                return True
     except ValueError:
-        pass 
-        
+        # FSN이 숫자가 아닌 특수 문자열일 경우를 위한 예비책
+        if fsn_str in eff_str:
+            return True
+            
     return False
 
 # 5. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
 
-# [수정됨] 318, 319, 320, 321을 하나의 그룹으로 완벽히 통합
 display_models = ['A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
 selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models)
 
-# 선택된 그룹에 따라 정규표현식(Regex) 검색 패턴 설정
 if 'A321' in selected_display:
-    # 318, 319, 320, 321 글자가 포함된 모든 기종을 하나로 묶어서 검색합니다.
     search_pattern = '318|319|320|321'
 elif 'A330' in selected_display:
     search_pattern = '330'
@@ -80,25 +80,29 @@ elif 'A380' in selected_display:
 else:
     search_pattern = ''
 
-# Fleet DB 필터링 및 Tail Number 추출
 filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 
-# [수정됨] Tail Number 목록 생성 시 빈칸(NaN) 오류 방지 및 정렬 기능 추가
 raw_tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
 tail_numbers = sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
 
 if len(tail_numbers) == 0:
-    st.warning(f"데이터베이스에 선택하신 기종에 해당하는 Tail Number가 없습니다.")
+    st.warning("데이터베이스에 선택하신 기종에 해당하는 Tail Number가 없습니다.")
     st.stop()
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 6. FSN 매칭 로직
-# 선택된 Tail Number에 해당하는 FSN 값 추출
-fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]['FSN'].values[0]
+# 6. [강화됨] FSN 매칭 및 전처리 로직
+raw_fsn = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]['FSN'].values[0]
+
+# 구글 시트에서 54로 입력되거나 파이썬이 54.0으로 읽더라도 무조건 Airbus 규격인 '054'로 완벽하게 변환
+try:
+    fsn_value = str(int(float(raw_fsn))).zfill(3)
+except:
+    fsn_value = str(raw_fsn).strip()
+
 st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
-# Dispatch DB 로드 (A320 Family의 경우 321로 작성된 매뉴얼 데이터도 모두 정상적으로 불러옴)
+# Dispatch DB 로드 및 필터링
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
 
