@@ -181,18 +181,37 @@ if 'MSN' in tail_data.columns:
 
 st.sidebar.info(f"✈️ 시스템 내부 식별\nMSN: **{msn_value}** | FSN: **{fsn_value}**")
 
-# 6. DB 필터링 (Effectivity 제거 -> 오직 "기종(Model)" 기준으로만 필터링)
+# 6. DB 필터링 (기종 기준)
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 
-# 7. 항목(Section) 필터링 (UI 편의성)
+# 7. 항목(Section) 및 세부 챕터(ATA) 필터링 (UI 계층 구조화)
 if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
+    # 7-1. 1차 필터: 항목(Section)
     sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
     selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
     
     if selected_section != '전체 (All)':
-        final_filtered_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section]
+        temp_filtered_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section].copy()
     else:
-        final_filtered_db = filtered_db_by_model
+        temp_filtered_db = filtered_db_by_model.copy()
+        
+    # 7-2. 2차 필터: 세부 챕터 (ATA) 추출
+    def extract_ata_prefix(ref_str):
+        # 링크 문자열에서 '숫자2자리-숫자2자리' 패턴(예: 12-12) 추출
+        match = re.search(r'(\d{2}-\d{2})', str(ref_str))
+        return match.group(1) if match else "미분류"
+        
+    temp_filtered_db['ATA_Prefix'] = temp_filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
+    
+    # 해당 항목에 존재하는 ATA 챕터 리스트업
+    ata_options = sorted([ata for ata in temp_filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
+    
+    selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
+    
+    if selected_ata != '전체 (All)':
+        final_filtered_db = temp_filtered_db[temp_filtered_db['ATA_Prefix'] == selected_ata]
+    else:
+        final_filtered_db = temp_filtered_db
 else:
     final_filtered_db = filtered_db_by_model
 
@@ -200,13 +219,12 @@ else:
 st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
-    st.warning("해당 기종에 등록된 작업 데이터가 없습니다.")
+    st.warning("해당 조건에 부합하는 작업 데이터가 없습니다.")
 else:
     for _, row in final_filtered_db.iterrows():
         with st.container(border=True):
             col1, col2 = st.columns([4, 1])
             with col1:
-                # Effectivity 관련 텍스트 출력 제거됨
                 st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
                 st.caption(f"Ref: {row['링크 (Reference)']}")
             with col2:
