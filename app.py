@@ -40,24 +40,25 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (분석된 단일 데이터 모듈 룰 완벽 적용)
+# 3-1. A321 전용 Maximize URL (확정된 단일 룰 적용)
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
     
-    # MSN 식별 (누락 시 시스템 에러 방지용 폴백)
+    # MSN 식별 (누락 시 시스템 에러 방지용 폴백 'ERROR')
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     
-    # 제시해주신 3개의 URL 패턴과 100% 일치하도록 템플릿 하드코딩
+    rev_id = "773433_SGML_C"
+    
     url = (
         f"https://w3.airbus.com/1T40/maximize?"
-        f"itemId=773433_SGML_C_EN{task_12}00"
-        f"&parentId=773433_SGML_C_EN{task_12}"
+        f"itemId={rev_id}_EN{task_12}00"
+        f"&parentId={rev_id}_EN{task_12}"
         f"&itemType=DATAMODULE"
         f"&itemFormat=HTML"
-        f"&revisionItemId=773433_SGML_C"
+        f"&revisionItemId={rev_id}"
         f"&wc=actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;tailNumber:N{msn_clean}"
         f"&context=dataModule"
         f"&viewMinimize=true"
@@ -111,7 +112,7 @@ def generate_a380_maximize_url(task_str, msn_str=""):
     return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
 
-# 4. 사이드바 필터 설정
+# 4. 사이드바 필터 설정 (A/C Model)
 st.sidebar.header("필터 설정")
 
 display_models = ['A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
@@ -139,7 +140,7 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 5. Fleet Mapping DB 정보 파싱
+# 5. Fleet Mapping DB 정보 파싱 (MSN, FSN)
 tail_data_row = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail].iloc[0]
 db_model_str = str(tail_data_row.get('A/C Model', '')).upper()
 
@@ -162,49 +163,49 @@ if not msn_value:
 else:
     st.sidebar.info(f"✈️ Fleet DB 식별 정보\n**Model:** {db_model_str}\n**MSN:** {msn_value} | **FSN:** {fsn_value}")
 
-# 6. 기본 DB 기종 필터링
-filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
+# =========================================================================
+# 6. [수정됨] 종속적(Cascading) 콤보박스 필터링 적용
+# =========================================================================
+# (1) Base Model 필터링
+filtered_db = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
 
-# 7. 독립적인 콤보박스 (종속 제한 없이 모두 전체 리스트 표기)
-if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
-    
-    sections_options = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
-    
+if not filtered_db.empty:
+    # ATA Prefix 미리 추출
     def extract_ata_prefix(ref_str):
         match = re.search(r'(\d{2}-\d{2})', str(ref_str))
         return match.group(1) if match else "미분류"
         
-    filtered_db_by_model['ATA_Prefix'] = filtered_db_by_model['링크 (Reference)'].apply(extract_ata_prefix)
-    ata_options = sorted([ata for ata in filtered_db_by_model['ATA_Prefix'].unique() if ata != "미분류"])
-    
-    if '작업 (Task Description)' in filtered_db_by_model.columns:
-        task_options = filtered_db_by_model['작업 (Task Description)'].unique().tolist()
-    else:
-        task_options = []
+    filtered_db['ATA_Prefix'] = filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
 
-    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options)
+    # (2) 항목 (Section) 필터 - 상위 Model 결과에 종속
+    if '항목 (Section)' in filtered_db.columns:
+        sections_options = ['전체 (All)'] + filtered_db['항목 (Section)'].dropna().unique().tolist()
+        selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options)
+        
+        # 선택된 Section으로 데이터 한정
+        if selected_section != '전체 (All)':
+            filtered_db = filtered_db[filtered_db['항목 (Section)'] == selected_section]
+
+    # (3) 세부 챕터 (ATA) 필터 - 상위 Section 결과에 종속
+    ata_options = sorted([ata for ata in filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
     selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
     
-    if task_options:
-        selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options)
-    else:
-        selected_task = '전체 (All)'
-
-    final_filtered_db = filtered_db_by_model.copy()
-    
-    if selected_section != '전체 (All)':
-        final_filtered_db = final_filtered_db[final_filtered_db['항목 (Section)'] == selected_section]
-        
+    # 선택된 ATA로 데이터 한정
     if selected_ata != '전체 (All)':
-        final_filtered_db = final_filtered_db[final_filtered_db['ATA_Prefix'] == selected_ata]
+        filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
+
+    # (4) 작업 (Task Description) 필터 - 상위 ATA 결과에 종속
+    if '작업 (Task Description)' in filtered_db.columns:
+        task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
+        selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options)
         
-    if selected_task != '전체 (All)':
-        final_filtered_db = final_filtered_db[final_filtered_db['작업 (Task Description)'] == selected_task]
+        # 선택된 Task로 데이터 한정
+        if selected_task != '전체 (All)':
+            filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
 
-else:
-    final_filtered_db = filtered_db_by_model
+final_filtered_db = filtered_db
 
-# 8. 메인 화면 리스트 출력
+# 7. 메인 화면 리스트 출력
 st.subheader(f"작업 리스트: {selected_tail}")
 
 if final_filtered_db.empty:
@@ -233,7 +234,7 @@ else:
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
 
-# 9. 데이터 전체 검색
+# 8. 데이터 전체 검색 (키워드 검색)
 st.markdown("---")
 st.subheader("데이터베이스 전체 검색")
 search_query = st.text_input("검색어를 입력하세요 (예: Door, Leak 등)")
