@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 
-# 1. 페이지 설정 (모바일 최적화 및 전체 너비 사용)
+# 1. 페이지 설정
 st.set_page_config(page_title="Airbus Quick Dispatch", layout="wide")
 
 st.markdown(
@@ -20,8 +20,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 2. 데이터 로드
-@st.cache_data
+# 2. [수정됨] 데이터 로드 (캐시 제거 - 항상 최신 GitHub 데이터를 읽어옵니다)
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
@@ -34,7 +33,7 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 4. [강화됨] FSN 적용 여부 확인 함수 (정밀 필터링)
+# 4. FSN 적용 여부 확인 함수 (정밀 필터링)
 def check_effectivity(fsn_str, eff_str):
     if pd.isna(eff_str): return True 
     eff_str = str(eff_str).upper()
@@ -42,22 +41,18 @@ def check_effectivity(fsn_str, eff_str):
     
     if not fsn_str or fsn_str == 'NAN': return True 
     
-    # 정비 데이터의 무결성을 위해 정규식으로 범위와 개별 숫자를 완벽히 분리
     ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
     singles = re.findall(r'\b(\d+)\b', eff_str)
     
     try:
         fsn_int = int(fsn_str)
-        # 1. 범위 (예: 054-099) 안에 들어가는지 철저히 확인
         for start, end in ranges:
             if int(start) <= fsn_int <= int(end):
                 return True
-        # 2. 콤마로 구분된 개별 숫자 (예: 151)와 정확히 일치하는지 확인
         for s in singles:
             if int(s) == fsn_int:
                 return True
     except ValueError:
-        # FSN이 숫자가 아닌 특수 문자열일 경우를 위한 예비책
         if fsn_str in eff_str:
             return True
             
@@ -91,10 +86,9 @@ if len(tail_numbers) == 0:
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 6. [강화됨] FSN 매칭 및 전처리 로직
+# 6. FSN 매칭 및 전처리 로직
 raw_fsn = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]['FSN'].values[0]
 
-# 구글 시트에서 54로 입력되거나 파이썬이 54.0으로 읽더라도 무조건 Airbus 규격인 '054'로 완벽하게 변환
 try:
     fsn_value = str(int(float(raw_fsn))).zfill(3)
 except:
