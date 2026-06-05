@@ -44,8 +44,8 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL 생성 함수
-def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
+# 3-1. A321 전용 Maximize URL 생성 함수 (룰 업데이트 적용)
+def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
@@ -54,18 +54,18 @@ def generate_a321_maximize_url(task_str, fsn_str="", msn_str=""):
     
     revision_id = "773433_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_prefix}020"
+    parent_id = f"{revision_id}_EN{task_prefix}040" # 020에서 040으로 업데이트
     
     wc_base = "actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;doctype:AMM"
-    wc_params = []
+    wc_params = [wc_base]
     
-    if fsn_str and str(fsn_str).upper() != 'NAN':
-        wc_params.append(f"FSN:{fsn_str}")
-        
-    wc_params.append(wc_base)
-    
+    # A321은 FSN 생략, N+MSN 조합 적용
     if msn_str and str(msn_str).upper() != 'NAN':
-        wc_params.append(f"tailNumber:N{msn_str}")
+        try:
+            msn_clean = str(int(float(msn_str)))
+            wc_params.append(f"tailNumber:N{msn_clean}")
+        except:
+            pass
         
     wc_final = ";".join(wc_params)
     
@@ -242,7 +242,8 @@ else:
                 # 기종별 맞춤형 URL 분기 로직 (선택된 Tail Number의 데이터 자동 대입)
                 max_url = None
                 if 'A321' in selected_display:
-                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], fsn_value, msn_value)
+                    # A321 룰 업데이트 적용 (MSN만 대입)
+                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
                 elif 'A330' in selected_display:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
                 elif 'A350' in selected_display:
