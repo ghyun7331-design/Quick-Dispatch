@@ -40,20 +40,45 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL
-def generate_a321_maximize_url(task_str, msn_str=""):
+# 3-1. A321 전용 Maximize URL (룰 추출 및 FSN 소트 적용)
+def generate_a321_maximize_url(task_str, msn_str="", fsn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
         
     task_12 = clean_task[:12]
+    task_prefix = task_12[:6]
+    
+    # 룰 1: 엔진(ATA 70 이상)은 04M, 그 외 기체 계통은 040 노드 적용
+    if int(task_prefix[:2]) >= 70:
+        node_id = "04M"
+    else:
+        node_id = "040"
+        
     revision_id = "773433_SGML_C"
     item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_12}" 
+    parent_id = f"{revision_id}_EN{task_prefix}{node_id}" 
     
-    msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
-    wc_final = f"actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;tailNumber:N{msn_clean}"
+    wc_params = []
     
-    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
+    # 룰 2: FSN 소트 강제 삽입 (요청 사항)
+    if fsn_str and str(fsn_str).upper() != 'NAN':
+        wc_params.append(f"FSN:{fsn_str}")
+        
+    # 룰 3: 추출된 패밀리 코드 및 doctype:AMM 유지
+    wc_params.append("actype:A318;actype:A319;actype:A320;actype:A321;customization:AAR;doctype:AMM")
+    
+    # 룰 4: 추출된 기번(Tail Number) N + MSN 소트
+    if msn_str and str(msn_str).upper() != 'NAN':
+        try:
+            msn_clean = str(int(float(msn_str)))
+            wc_params.append(f"tailNumber:N{msn_clean}")
+        except:
+            pass
+            
+    wc_final = ";".join(wc_params)
+    
+    # 룰 5: context=document 복구 적용
+    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&context=document&wc={wc_final}&viewMinimize=true"
 
 # 3-2. A330 전용 Maximize URL
 def generate_a330_maximize_url(task_str, msn_str=""):
@@ -156,12 +181,9 @@ else:
 # 6. 기본 DB 기종 필터링
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
 
-# =========================================================================
-# 7. [수정됨] 독립적인 콤보박스 (종속 제한 삭제)
-# =========================================================================
+# 7. 독립적인 콤보박스 (종속 제한 없이 모두 전체 리스트 표기)
 if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
     
-    # 콤보박스에 들어갈 전체 옵션 목록을 미리 생성 (선택에 의해 줄어들지 않음)
     sections_options = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
     
     def extract_ata_prefix(ref_str):
@@ -176,7 +198,6 @@ if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_mod
     else:
         task_options = []
 
-    # 화면에 콤보박스 3개 배치 (항상 전체 목록 제공)
     selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options)
     selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
     
@@ -185,7 +206,6 @@ if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_mod
     else:
         selected_task = '전체 (All)'
 
-    # 사용자가 선택한 각각의 조건을 독립적으로 필터링 적용
     final_filtered_db = filtered_db_by_model.copy()
     
     if selected_section != '전체 (All)':
@@ -215,7 +235,8 @@ else:
             with col2:
                 max_url = None
                 if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
-                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
+                    # A321의 경우 fsn_value 인자를 함께 넘겨 룰 반영
+                    max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value, fsn_value)
                 elif '330' in db_model_str:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
                 elif '350' in db_model_str:
