@@ -184,34 +184,45 @@ st.sidebar.info(f"✈️ 시스템 내부 식별\nMSN: **{msn_value}** | FSN: **
 # 6. DB 필터링 (기종 기준)
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 
-# 7. 항목(Section) 및 세부 챕터(ATA) 필터링 (UI 계층 구조화)
+# 7. 계층적 필터링 (Section -> ATA -> Task)
 if '항목 (Section)' in filtered_db_by_model.columns and not filtered_db_by_model.empty:
     # 7-1. 1차 필터: 항목(Section)
     sections = ['전체 (All)'] + filtered_db_by_model['항목 (Section)'].unique().tolist()
     selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections)
     
     if selected_section != '전체 (All)':
-        temp_filtered_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section].copy()
+        step1_db = filtered_db_by_model[filtered_db_by_model['항목 (Section)'] == selected_section].copy()
     else:
-        temp_filtered_db = filtered_db_by_model.copy()
+        step1_db = filtered_db_by_model.copy()
         
-    # 7-2. 2차 필터: 세부 챕터 (ATA) 추출
+    # 7-2. 2차 필터: 세부 챕터 (ATA)
     def extract_ata_prefix(ref_str):
         # 링크 문자열에서 '숫자2자리-숫자2자리' 패턴(예: 12-12) 추출
         match = re.search(r'(\d{2}-\d{2})', str(ref_str))
         return match.group(1) if match else "미분류"
         
-    temp_filtered_db['ATA_Prefix'] = temp_filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
-    
-    # 해당 항목에 존재하는 ATA 챕터 리스트업
-    ata_options = sorted([ata for ata in temp_filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
+    step1_db['ATA_Prefix'] = step1_db['링크 (Reference)'].apply(extract_ata_prefix)
+    ata_options = sorted([ata for ata in step1_db['ATA_Prefix'].unique() if ata != "미분류"])
     
     selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
     
     if selected_ata != '전체 (All)':
-        final_filtered_db = temp_filtered_db[temp_filtered_db['ATA_Prefix'] == selected_ata]
+        step2_db = step1_db[step1_db['ATA_Prefix'] == selected_ata].copy()
     else:
-        final_filtered_db = temp_filtered_db
+        step2_db = step1_db.copy()
+
+    # 7-3. 3차 필터: 작업 (Task Description)
+    if '작업 (Task Description)' in step2_db.columns:
+        task_options = step2_db['작업 (Task Description)'].unique().tolist()
+        selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options)
+        
+        if selected_task != '전체 (All)':
+            final_filtered_db = step2_db[step2_db['작업 (Task Description)'] == selected_task]
+        else:
+            final_filtered_db = step2_db
+    else:
+        final_filtered_db = step2_db
+
 else:
     final_filtered_db = filtered_db_by_model
 
