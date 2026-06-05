@@ -161,9 +161,10 @@ if selected_ata != '전체 (All)':
     filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
 
 # [범위 한정 3] 작업 (Task Description) -> 상위 ATA 결과에만 의존하여 옵션 표시
+# ★ 이 부분이 selectbox(콤보박스)에서 radio(리스트 나열)로 변경되었습니다.
 if '작업 (Task Description)' in filtered_db.columns:
     task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
-    selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
+    selected_task = st.sidebar.radio("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
     if selected_task != '전체 (All)':
         filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
 
