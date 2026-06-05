@@ -2,9 +2,24 @@ import streamlit as st
 import pandas as pd
 import re
 
-# 1. 페이지 설정
+# 1. 페이지 설정 (모바일 최적화 및 전체 너비 사용)
 st.set_page_config(page_title="Airbus Quick Dispatch", layout="wide")
-st.title("✈️ Airbus Quick Dispatch Guide")
+
+# 1-1. 제목을 무조건 한 줄로 표시하고 화면에 맞춰 자동 축소하는 CSS 설정
+st.markdown(
+    """
+    <style>
+    .responsive-title {
+        font-size: clamp(1.2rem, 4vw, 2.5rem); /* 화면 크기에 따라 글자 크기가 유연하게 변함 */
+        white-space: nowrap; /* 절대 줄바꿈을 허용하지 않음 */
+        font-weight: bold;
+        padding-bottom: 20px;
+    }
+    </style>
+    <div class="responsive-title">✈️ Airbus Quick Dispatch Guide</div>
+    """,
+    unsafe_allow_html=True
+)
 
 # 2. 데이터 로드
 @st.cache_data
@@ -20,20 +35,18 @@ def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 4. FSN 적용 여부 확인 함수 (Effectivity 스마트 파싱)
+# 4. FSN 적용 여부 확인 함수
 def check_effectivity(fsn, eff_str):
-    if pd.isna(eff_str): return True # Effectivity 값이 비어있으면 모든 호기 적용으로 간주
+    if pd.isna(eff_str): return True 
     eff_str = str(eff_str).upper()
-    if 'ALL' in eff_str: return True # 'ALL'이라고 적혀있으면 무조건 적용
+    if 'ALL' in eff_str: return True 
     
     fsn_str = str(fsn).strip()
     if not fsn_str or fsn_str == 'NAN': return True 
     
-    # 조건 A: 단순 텍스트 포함 여부 (예: '051'이 '051, 052'에 있는지)
     if fsn_str in eff_str:
         return True
     
-    # 조건 B: 범위 형태 (예: 001-050) 안에 FSN이 속해 있는지 계산
     ranges = re.findall(r'(\d+)\s*-\s*(\d+)', eff_str)
     try:
         fsn_int = int(fsn_str)
@@ -41,36 +54,35 @@ def check_effectivity(fsn, eff_str):
             if int(start) <= fsn_int <= int(end):
                 return True
     except ValueError:
-        pass # FSN이 숫자가 아닌 문자일 경우 에러 방지
+        pass 
         
     return False
 
 # 5. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
 
-# [조건 1] 검색 조건: 321, 330, 350, 380 콤보박스 표시
-base_models = ['321', '330', '350', '380']
-selected_base = st.sidebar.selectbox("기종 그룹 (Base Model)", base_models)
+# [수정됨] 화면 표시용(A321)과 검색용(321) 분리 로직
+display_models = ['A321', 'A330', 'A350', 'A380']
+selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models)
 
-# Fleet DB에서 선택한 기종(예: 321)이 포함된 A/C Model만 걸러서 Tail Number 표시
+# DB 검색을 위해 선택된 값에서 'A'를 제거 (예: 'A321' -> '321')
+selected_base = selected_display.replace('A', '')
+
+# Fleet DB에서 기종 필터링
 filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(selected_base, na=False)]
 tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
 
 if len(tail_numbers) == 0:
-    st.warning(f"데이터베이스에 {selected_base} 기종에 해당하는 Tail Number가 없습니다.")
+    st.warning(f"데이터베이스에 {selected_display} 기종에 해당하는 Tail Number가 없습니다.")
     st.stop()
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
-# 6. FSN 매칭 로직 (조건 2 반영)
-# 선택한 Tail Number의 FSN 값을 Fleet DB에서 가져옴
+# 6. FSN 매칭 로직
 fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'] == selected_tail]['FSN'].values[0]
 st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
-# Dispatch DB 1차 필터: 선택한 Base Model(321, 330 등)이 포함된 작업만
 filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(selected_base, na=False)]
-
-# Dispatch DB 2차 필터: Effectivity 컬럼에 FSN이 적용되는 작업만 남김
 filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
 
 # 7. 항목(Section) 필터링
