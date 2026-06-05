@@ -26,7 +26,7 @@ def clean_tail_number(val):
     match = re.search(r'(HL\d{4})', str(val))
     return match.group(1) if match else str(val)
 
-@st.cache_data(ttl=0) # 항상 최신 데이터 로드
+@st.cache_data(ttl=0)
 def load_data():
     db = pd.read_csv('Quick Dispatch - Quick Dispatch_DB.csv')
     fleet = pd.read_csv('Quick Dispatch - Fleet Mapping DB.csv')
@@ -35,21 +35,16 @@ def load_data():
 
 db_df, fleet_df = load_data()
 
-# 3. URL 자동 생성 함수 (공통 검색)
+# 3. URL 자동 생성 함수
 def get_search_url(task_str):
     clean_id = re.sub(r'[^0-9-]', '', str(task_str))
     return f"https://w3.airbus.com/1T40/search?q={clean_id}"
 
-# 3-1. A321 전용 Maximize URL (확정된 단일 룰 적용)
 def generate_a321_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
-        
     task_12 = clean_task[:12]
-    
-    # MSN 식별 (누락 시 시스템 에러 방지용 폴백 'ERROR')
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
-    
     rev_id = "773433_SGML_C"
     
     url = (
@@ -65,26 +60,19 @@ def generate_a321_maximize_url(task_str, msn_str=""):
     )
     return url
 
-# 3-2. A330 전용 Maximize URL
 def generate_a330_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
-        
     task_12 = clean_task[:12]
     revision_id = "768908_SGML_C"
-    item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_12}" 
-    
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     wc_final = f"actype:A330;customization:AAR;tailNumber:F{msn_clean}"
     
-    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
+    return f"https://w3.airbus.com/1T40/maximize?itemId={revision_id}_EN{task_12}00&parentId={revision_id}_EN{task_12}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-3. A350 전용 URL
 def generate_a350_url(task_str, msn_str=""):
     task = re.sub(r'^(TASK|Ref\.\s+MP)\s+', '', str(task_str).strip(), flags=re.IGNORECASE)
     rev = "776735_S1KD_C"
-    
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     wc_final = f"actype:A350;customization:AAR;tailNumber:P{msn_clean}"
     
@@ -96,136 +84,116 @@ def generate_a350_url(task_str, msn_str=""):
     else:
         return f"https://w3.airbus.com/1T40/maximize?itemId={rev}_{task}&parentId={rev}_{task}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={rev}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
-# 3-4. A380 전용 Maximize URL
 def generate_a380_maximize_url(task_str, msn_str=""):
     clean_task = re.sub(r'[^0-9]', '', str(task_str))
     if len(clean_task) < 12: return None
-        
     task_12 = clean_task[:12]
     revision_id = "763497_SGML_C"
-    item_id = f"{revision_id}_EN{task_12}00"
-    parent_id = f"{revision_id}_EN{task_12}" 
-    
     msn_clean = re.sub(r'[^0-9]', '', str(msn_str)) if msn_str and str(msn_str).upper() != 'NAN' else "ERROR"
     wc_final = f"FSN:005;actype:A380;customization:AAR;tailNumber:L{msn_clean}"
     
-    return f"https://w3.airbus.com/1T40/maximize?itemId={item_id}&parentId={parent_id}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
+    return f"https://w3.airbus.com/1T40/maximize?itemId={revision_id}_EN{task_12}00&parentId={revision_id}_EN{task_12}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
 
-# 4. 사이드바 필터 설정 (A/C Model)
+# 4. 사이드바 필터 설정 (종속형)
 st.sidebar.header("필터 설정")
 
-display_models = ['A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
-selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models)
+# (1) Base Model 선택 (기본값: 전체)
+display_models = ['전체 (All)', 'A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
+selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models, index=0)
 
-if 'A321' in selected_display:
-    search_pattern = '318|319|320|321'
-elif 'A330' in selected_display:
-    search_pattern = '330'
-elif 'A350' in selected_display:
-    search_pattern = '350'
-elif 'A380' in selected_display:
-    search_pattern = '380'
+search_pattern = ""
+if 'A321' in selected_display: search_pattern = '318|319|320|321'
+elif 'A330' in selected_display: search_pattern = '330'
+elif 'A350' in selected_display: search_pattern = '350'
+elif 'A380' in selected_display: search_pattern = '380'
+
+# (2) Fleet DB 필터링 및 Tail Number 선택
+if search_pattern:
+    filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 else:
-    search_pattern = ''
+    filtered_fleet = fleet_df
 
-# Fleet DB에서 기종에 맞는 Tail Number 목록 로드
-filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 raw_tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
-tail_numbers = sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
+tail_numbers = ['전체 (All)'] + sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
 
-if len(tail_numbers) == 0:
-    st.warning("데이터베이스에 선택하신 기종에 해당하는 Tail Number가 없습니다.")
-    st.stop()
+selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers, index=0)
 
-selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
-
-# 5. Fleet Mapping DB 정보 파싱 (MSN, FSN)
-tail_data_row = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail].iloc[0]
-db_model_str = str(tail_data_row.get('A/C Model', '')).upper()
-
-fsn_value = ""
-fsn_cols = [col for col in tail_data_row.index if 'FSN' in str(col).upper()]
-if fsn_cols:
-    raw_fsn = tail_data_row[fsn_cols[0]]
-    if pd.notna(raw_fsn) and str(raw_fsn).strip().upper() != 'NAN':
-        fsn_value = re.sub(r'[^0-9]', '', str(raw_fsn)).zfill(3)
-
+# (3) MSN/FSN 추출
 msn_value = ""
-msn_cols = [col for col in tail_data_row.index if 'MSN' in str(col).upper()]
-if msn_cols:
-    raw_msn = tail_data_row[msn_cols[0]]
-    if pd.notna(raw_msn) and str(raw_msn).strip().upper() != 'NAN':
-        msn_value = re.sub(r'[^0-9]', '', str(raw_msn))
-
-if not msn_value:
-    st.sidebar.error("⚠️ Fleet DB에 MSN 데이터가 누락되었습니다.")
-else:
-    st.sidebar.info(f"✈️ Fleet DB 식별 정보\n**Model:** {db_model_str}\n**MSN:** {msn_value} | **FSN:** {fsn_value}")
-
-# =========================================================================
-# 6. [수정됨] 종속적(Cascading) 콤보박스 필터링 적용
-# =========================================================================
-# (1) Base Model 필터링
-filtered_db = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
-
-if not filtered_db.empty:
-    # ATA Prefix 미리 추출
-    def extract_ata_prefix(ref_str):
-        match = re.search(r'(\d{2}-\d{2})', str(ref_str))
-        return match.group(1) if match else "미분류"
-        
-    filtered_db['ATA_Prefix'] = filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
-
-    # (2) 항목 (Section) 필터 - 상위 Model 결과에 종속
-    if '항목 (Section)' in filtered_db.columns:
-        sections_options = ['전체 (All)'] + filtered_db['항목 (Section)'].dropna().unique().tolist()
-        selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options)
-        
-        # 선택된 Section으로 데이터 한정
-        if selected_section != '전체 (All)':
-            filtered_db = filtered_db[filtered_db['항목 (Section)'] == selected_section]
-
-    # (3) 세부 챕터 (ATA) 필터 - 상위 Section 결과에 종속
-    ata_options = sorted([ata for ata in filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
-    selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options)
+if selected_tail != '전체 (All)':
+    tail_data_row = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail].iloc[0]
+    db_model_str = str(tail_data_row.get('A/C Model', '')).upper()
     
-    # 선택된 ATA로 데이터 한정
-    if selected_ata != '전체 (All)':
-        filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
+    fsn_cols = [col for col in tail_data_row.index if 'FSN' in str(col).upper()]
+    fsn_value = re.sub(r'[^0-9]', '', str(tail_data_row[fsn_cols[0]])).zfill(3) if fsn_cols and pd.notna(tail_data_row[fsn_cols[0]]) else ""
+    
+    msn_cols = [col for col in tail_data_row.index if 'MSN' in str(col).upper()]
+    msn_value = re.sub(r'[^0-9]', '', str(tail_data_row[msn_cols[0]])) if msn_cols and pd.notna(tail_data_row[msn_cols[0]]) else ""
 
-    # (4) 작업 (Task Description) 필터 - 상위 ATA 결과에 종속
-    if '작업 (Task Description)' in filtered_db.columns:
-        task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
-        selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options)
-        
-        # 선택된 Task로 데이터 한정
-        if selected_task != '전체 (All)':
-            filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
+    st.sidebar.info(f"✈️ Fleet 식별 정보\n**Model:** {db_model_str}\n**MSN:** {msn_value} | **FSN:** {fsn_value}")
+else:
+    st.sidebar.info("ℹ️ 전체 모드입니다. 기번을 선택하시면 기체 맞춤 URL이 생성됩니다.")
 
-final_filtered_db = filtered_db
+# 5. DB 필터링 및 하위 콤보박스 종속 (Cascading) 로직
+if search_pattern:
+    filtered_db = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
+else:
+    filtered_db = db_df.copy()
 
-# 7. 메인 화면 리스트 출력
-st.subheader(f"작업 리스트: {selected_tail}")
+# ATA Prefix 세팅
+def extract_ata_prefix(ref_str):
+    match = re.search(r'(\d{2}-\d{2})', str(ref_str))
+    return match.group(1) if match else "미분류"
+filtered_db['ATA_Prefix'] = filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
 
-if final_filtered_db.empty:
+# [범위 한정 1] 항목 (Section)
+if '항목 (Section)' in filtered_db.columns:
+    sections_options = ['전체 (All)'] + filtered_db['항목 (Section)'].dropna().unique().tolist()
+    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options, index=0)
+    if selected_section != '전체 (All)':
+        filtered_db = filtered_db[filtered_db['항목 (Section)'] == selected_section]
+
+# [범위 한정 2] 세부 챕터 (ATA) -> 상위 Section 결과에만 의존하여 옵션 표시
+ata_options = sorted([ata for ata in filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
+selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options, index=0)
+if selected_ata != '전체 (All)':
+    filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
+
+# [범위 한정 3] 작업 (Task Description) -> 상위 ATA 결과에만 의존하여 옵션 표시
+if '작업 (Task Description)' in filtered_db.columns:
+    task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
+    selected_task = st.sidebar.selectbox("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
+    if selected_task != '전체 (All)':
+        filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
+
+# 6. 메인 화면 리스트 출력
+title_text = f"작업 리스트: {selected_tail}" if selected_tail != '전체 (All)' else "작업 리스트: 전체 보기"
+st.subheader(title_text)
+
+if filtered_db.empty:
     st.warning("선택하신 조합에 부합하는 작업 데이터가 없습니다.")
 else:
-    for _, row in final_filtered_db.iterrows():
+    for _, row in filtered_db.iterrows():
         with st.container(border=True):
             col1, col2 = st.columns([4, 1])
             with col1:
-                st.write(f"**[{row['항목 (Section)']}]** {row['작업 (Task Description)']}")
-                st.caption(f"Ref: {row['링크 (Reference)']}")
+                st.write(f"**[{row.get('항목 (Section)', '미분류')}]** {row.get('작업 (Task Description)', '내용 없음')}")
+                st.caption(f"Ref: {row.get('링크 (Reference)', '')}")
             with col2:
                 max_url = None
-                if '321' in db_model_str or '320' in db_model_str or '319' in db_model_str or '318' in db_model_str:
+                
+                # 기종 구분이 전체일 경우 각 데이터 행의 기종을 추적하여 URL 부여
+                row_model = str(row.get('기종 (Model)', '')).upper()
+                model_indicator = row_model if row_model else selected_display
+                
+                if '321' in model_indicator or '320' in model_indicator or '319' in model_indicator or '318' in model_indicator:
                     max_url = generate_a321_maximize_url(row['링크 (Reference)'], msn_value)
-                elif '330' in db_model_str:
+                elif '330' in model_indicator:
                     max_url = generate_a330_maximize_url(row['링크 (Reference)'], msn_value)
-                elif '350' in db_model_str:
+                elif '350' in model_indicator:
                     max_url = generate_a350_url(row['링크 (Reference)'], msn_value)
-                elif '380' in db_model_str:
+                elif '380' in model_indicator:
                     max_url = generate_a380_maximize_url(row['링크 (Reference)'], msn_value)
                 
                 if max_url:
@@ -234,10 +202,10 @@ else:
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
 
-# 8. 데이터 전체 검색 (키워드 검색)
+# 7. 데이터 전체 검색 (키워드 검색)
 st.markdown("---")
-st.subheader("데이터베이스 전체 검색")
+st.subheader("데이터베이스 내부 검색")
 search_query = st.text_input("검색어를 입력하세요 (예: Door, Leak 등)")
 if search_query:
-    result = final_filtered_db[final_filtered_db['작업 (Task Description)'].str.contains(search_query, case=False, na=False)]
+    result = filtered_db[filtered_db['작업 (Task Description)'].str.contains(search_query, case=False, na=False)]
     st.dataframe(result, use_container_width=True)
