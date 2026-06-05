@@ -10,8 +10,8 @@ st.markdown(
     """
     <style>
     .responsive-title {
-        font-size: clamp(1.2rem, 4vw, 2.5rem); /* 화면 크기에 따라 글자 크기가 유연하게 변함 */
-        white-space: nowrap; /* 절대 줄바꿈을 허용하지 않음 */
+        font-size: clamp(1.2rem, 4vw, 2.5rem);
+        white-space: nowrap;
         font-weight: bold;
         padding-bottom: 20px;
     }
@@ -63,29 +63,43 @@ def check_effectivity(fsn, eff_str):
 # 5. 사이드바 필터 설정
 st.sidebar.header("필터 설정")
 
-# [업데이트] A320 포함 및 화면 표시(A321)와 검색(321) 분리
-display_models = ['A320', 'A321', 'A330', 'A350', 'A380']
+# [수정됨] 318, 319, 320, 321을 하나의 그룹으로 완벽히 통합
+display_models = ['A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
 selected_display = st.sidebar.selectbox("기종 그룹 (Base Model)", display_models)
 
-# DB 검색을 위해 선택된 값에서 'A'를 제거 (예: 'A321' -> '321')
-selected_base = selected_display.replace('A', '')
+# 선택된 그룹에 따라 정규표현식(Regex) 검색 패턴 설정
+if 'A321' in selected_display:
+    # 318, 319, 320, 321 글자가 포함된 모든 기종을 하나로 묶어서 검색합니다.
+    search_pattern = '318|319|320|321'
+elif 'A330' in selected_display:
+    search_pattern = '330'
+elif 'A350' in selected_display:
+    search_pattern = '350'
+elif 'A380' in selected_display:
+    search_pattern = '380'
+else:
+    search_pattern = ''
 
-# Fleet DB에서 기종 필터링
-filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(selected_base, na=False)]
-tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
+# Fleet DB 필터링 및 Tail Number 추출
+filtered_fleet = fleet_df[fleet_df['A/C Model'].astype(str).str.contains(search_pattern, regex=True, na=False)]
+
+# [수정됨] Tail Number 목록 생성 시 빈칸(NaN) 오류 방지 및 정렬 기능 추가
+raw_tail_numbers = filtered_fleet['Tail Number (등록기호)'].unique()
+tail_numbers = sorted([str(t) for t in raw_tail_numbers if str(t).lower() != 'nan'])
 
 if len(tail_numbers) == 0:
-    st.warning(f"데이터베이스에 {selected_display} 기종에 해당하는 Tail Number가 없습니다.")
+    st.warning(f"데이터베이스에 선택하신 기종에 해당하는 Tail Number가 없습니다.")
     st.stop()
 
 selected_tail = st.sidebar.selectbox("Tail Number 선택", tail_numbers)
 
 # 6. FSN 매칭 로직
-fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'] == selected_tail]['FSN'].values[0]
+# 선택된 Tail Number에 해당하는 FSN 값 추출
+fsn_value = filtered_fleet[filtered_fleet['Tail Number (등록기호)'].astype(str) == selected_tail]['FSN'].values[0]
 st.sidebar.info(f"✈️ 선택된 호기 FSN: **{fsn_value}**")
 
-# Dispatch DB 1, 2차 필터링
-filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(selected_base, na=False)]
+# Dispatch DB 로드 (A320 Family의 경우 321로 작성된 매뉴얼 데이터도 모두 정상적으로 불러옴)
+filtered_db_by_model = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)]
 filtered_db_by_eff = filtered_db_by_model[filtered_db_by_model['적용 (Effectivity)'].apply(lambda x: check_effectivity(fsn_value, x))]
 
 # 7. 항목(Section) 필터링
