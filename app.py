@@ -95,8 +95,8 @@ def generate_a380_maximize_url(task_str, msn_str=""):
     return f"https://w3.airbus.com/1T40/maximize?itemId={revision_id}_EN{task_12}00&parentId={revision_id}_EN{task_12}&itemType=DATAMODULE&itemFormat=HTML&revisionItemId={revision_id}&wc={wc_final}&context=dataModule&viewMinimize=true"
 
 
-# 4. 사이드바 필터 설정 (종속형)
-st.sidebar.header("필터 설정")
+# 4. 사이드바 필터 설정 (기본 기종/기번 세팅)
+st.sidebar.header("기본 설정")
 
 # (1) Base Model 선택 (기본값: 전체)
 display_models = ['전체 (All)', 'A321 (318/319/320 포함)', 'A330', 'A350', 'A380']
@@ -135,65 +135,40 @@ if selected_tail != '전체 (All)':
 else:
     st.sidebar.info("ℹ️ 전체 모드입니다. 기번을 선택하시면 기체 맞춤 URL이 생성됩니다.")
 
-# 5. DB 필터링 및 하위 콤보박스 종속 (Cascading) 로직
+# 5. DB 필터링 초기화
 if search_pattern:
     filtered_db = db_df[db_df['기종 (Model)'].astype(str).str.contains(search_pattern, regex=True, na=False)].copy()
 else:
     filtered_db = db_df.copy()
 
-# ATA Prefix 세팅
-def extract_ata_prefix(ref_str):
-    match = re.search(r'(\d{2}-\d{2})', str(ref_str))
-    return match.group(1) if match else "미분류"
-filtered_db['ATA_Prefix'] = filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
-
-# [범위 한정 1] 항목 (Section)
-if '항목 (Section)' in filtered_db.columns:
-    sections_options = ['전체 (All)'] + filtered_db['항목 (Section)'].dropna().unique().tolist()
-    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options, index=0)
-    if selected_section != '전체 (All)':
-        filtered_db = filtered_db[filtered_db['항목 (Section)'] == selected_section]
-
-# [범위 한정 2] 세부 챕터 (ATA) -> 상위 Section 결과에만 의존하여 옵션 표시
-ata_options = sorted([ata for ata in filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
-selected_ata = st.sidebar.selectbox("세부 챕터 (ATA) 선택", ['전체 (All)'] + ata_options, index=0)
-if selected_ata != '전체 (All)':
-    filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
-
-# [범위 한정 3] 작업 (Task Description) -> 상위 ATA 결과에만 의존하여 옵션 표시
-if '작업 (Task Description)' in filtered_db.columns:
-    task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
-    selected_task = st.sidebar.radio("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
-    if selected_task != '전체 (All)':
-        filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
-
 # ==========================================
-# ★ 6. 전체 1차 & 2차 키워드 텍스트 검색 
+# ★ 6. 사이드바 스마트 텍스트 검색 (콤보박스 완전 삭제)
 # ==========================================
-st.markdown("---")
-st.subheader("🔍 키워드 다중 검색")
+st.sidebar.markdown("---")
+st.sidebar.header("🔍 키워드 다중 검색")
 
-# 검색창을 가로로 두 개 나란히 배치합니다.
-col_search1, col_search2 = st.columns(2)
+# 타자를 칠 수 있는 텍스트 검색창으로 교체
+search_1 = st.sidebar.text_input("1차 검색어 (예: 05-50, Door 등)")
+search_2 = st.sidebar.text_input("2차 검색어 (결과 내 추가 검색)")
 
-with col_search1:
-    search_1 = st.text_input("1차 검색어 (예: Door, Pump 등)")
-with col_search2:
-    search_2 = st.text_input("2차 검색어 (1차 결과 내 추가 검색, 예: Leak)")
-
-# 1차 검색어가 입력되면 해당 단어로 필터링
+# 1차 검색어가 입력되면 전체 내용(작업내용, 레퍼런스, 섹션)에서 찾습니다.
 if search_1:
-    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_1, case=False, na=False)]
+    mask1 = filtered_db['작업 (Task Description)'].astype(str).str.contains(search_1, case=False, na=False) | \
+            filtered_db['링크 (Reference)'].astype(str).str.contains(search_1, case=False, na=False) | \
+            filtered_db['항목 (Section)'].astype(str).str.contains(search_1, case=False, na=False)
+    filtered_db = filtered_db[mask1]
 
-# 2차 검색어가 입력되면 1차로 걸러진 상태에서 한 번 더 필터링
+# 2차 검색어가 입력되면 1차로 걸러진 상태에서 한 번 더 필터링합니다.
 if search_2:
-    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_2, case=False, na=False)]
+    mask2 = filtered_db['작업 (Task Description)'].astype(str).str.contains(search_2, case=False, na=False) | \
+            filtered_db['링크 (Reference)'].astype(str).str.contains(search_2, case=False, na=False) | \
+            filtered_db['항목 (Section)'].astype(str).str.contains(search_2, case=False, na=False)
+    filtered_db = filtered_db[mask2]
 
 
 # ==========================================
 # 7. 메인 화면 리스트 출력
 # ==========================================
-st.markdown("---")
 title_text = f"작업 리스트: {selected_tail}" if selected_tail != '전체 (All)' else "작업 리스트: 전체 보기"
 
 # 필터링 결과 몇 건인지 표시
