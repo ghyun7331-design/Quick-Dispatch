@@ -168,21 +168,35 @@ if '작업 (Task Description)' in filtered_db.columns:
         filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
 
 # ==========================================
-# ★ 6. 결과 내 2차 검색 (스마트 텍스트 필터)
+# ★ 6. 전체 1차 & 2차 키워드 텍스트 검색 
 # ==========================================
 st.markdown("---")
-search_query = st.text_input("🔍 2차 검색: 좌측 필터 결과가 많을 경우 키워드를 입력해 좁혀보세요. (예: Door, Leak)")
+st.subheader("🔍 키워드 다중 검색")
 
-if search_query:
-    # 필터링된 데이터 안에서 텍스트로 한 번 더 거릅니다.
-    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_query, case=False, na=False)]
+# 검색창을 가로로 두 개 나란히 배치합니다.
+col_search1, col_search2 = st.columns(2)
+
+with col_search1:
+    search_1 = st.text_input("1차 검색어 (예: Door, Pump 등)")
+with col_search2:
+    search_2 = st.text_input("2차 검색어 (1차 결과 내 추가 검색, 예: Leak)")
+
+# 1차 검색어가 입력되면 해당 단어로 필터링
+if search_1:
+    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_1, case=False, na=False)]
+
+# 2차 검색어가 입력되면 1차로 걸러진 상태에서 한 번 더 필터링
+if search_2:
+    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_2, case=False, na=False)]
+
 
 # ==========================================
 # 7. 메인 화면 리스트 출력
 # ==========================================
+st.markdown("---")
 title_text = f"작업 리스트: {selected_tail}" if selected_tail != '전체 (All)' else "작업 리스트: 전체 보기"
 
-# 필터링 결과 몇 건인지 표시하여 직관성 향상
+# 필터링 결과 몇 건인지 표시
 st.subheader(f"{title_text} (총 {len(filtered_db)}건)")
 
 if filtered_db.empty:
