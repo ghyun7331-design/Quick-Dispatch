@@ -161,19 +161,32 @@ if selected_ata != '전체 (All)':
     filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
 
 # [범위 한정 3] 작업 (Task Description) -> 상위 ATA 결과에만 의존하여 옵션 표시
-# ★ 이 부분이 selectbox(콤보박스)에서 radio(리스트 나열)로 변경되었습니다.
 if '작업 (Task Description)' in filtered_db.columns:
     task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
     selected_task = st.sidebar.radio("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
     if selected_task != '전체 (All)':
         filtered_db = filtered_db[filtered_db['작업 (Task Description)'] == selected_task]
 
-# 6. 메인 화면 리스트 출력
+# ==========================================
+# ★ 6. 결과 내 2차 검색 (스마트 텍스트 필터)
+# ==========================================
+st.markdown("---")
+search_query = st.text_input("🔍 2차 검색: 좌측 필터 결과가 많을 경우 키워드를 입력해 좁혀보세요. (예: Door, Leak)")
+
+if search_query:
+    # 필터링된 데이터 안에서 텍스트로 한 번 더 거릅니다.
+    filtered_db = filtered_db[filtered_db['작업 (Task Description)'].astype(str).str.contains(search_query, case=False, na=False)]
+
+# ==========================================
+# 7. 메인 화면 리스트 출력
+# ==========================================
 title_text = f"작업 리스트: {selected_tail}" if selected_tail != '전체 (All)' else "작업 리스트: 전체 보기"
-st.subheader(title_text)
+
+# 필터링 결과 몇 건인지 표시하여 직관성 향상
+st.subheader(f"{title_text} (총 {len(filtered_db)}건)")
 
 if filtered_db.empty:
-    st.warning("선택하신 조합에 부합하는 작업 데이터가 없습니다.")
+    st.warning("선택하신 조합이나 검색어에 부합하는 작업 데이터가 없습니다.")
 else:
     for _, row in filtered_db.iterrows():
         with st.container(border=True):
@@ -202,11 +215,3 @@ else:
                 
                 search_url = get_search_url(row['링크 (Reference)'])
                 st.link_button("검색으로 열기 (Search)", search_url)
-
-# 7. 데이터 전체 검색 (키워드 검색)
-st.markdown("---")
-st.subheader("데이터베이스 내부 검색")
-search_query = st.text_input("검색어를 입력하세요 (예: Door, Leak 등)")
-if search_query:
-    result = filtered_db[filtered_db['작업 (Task Description)'].str.contains(search_query, case=False, na=False)]
-    st.dataframe(result, use_container_width=True)
