@@ -147,12 +147,34 @@ def extract_ata_prefix(ref_str):
     return match.group(1) if match else "미분류"
 filtered_db['ATA_Prefix'] = filtered_db['링크 (Reference)'].apply(extract_ata_prefix)
 
-# [범위 한정 1] 항목 (Section)
+
+# ==========================================
+# ★ [범위 한정 1] 항목 (Section) - 화면 표시용 이름 매핑 추가
+# ==========================================
 if '항목 (Section)' in filtered_db.columns:
+    # 1. 화면에 길게 보여줄 이름들을 매핑해 둡니다. (필요시 항목을 더 추가하세요)
+    section_display_names = {
+        "전체 (All)": "전체 (All)",
+        "A. Configuration": "A. Aircraft Configuration before Maintenance",
+        "B. Deactivation": "B. Deactivation/Reactivation procedures",
+        "C. Energization": "C. Aircraft Energization/Pressurization",
+    }
+    
     sections_options = ['전체 (All)'] + filtered_db['항목 (Section)'].dropna().unique().tolist()
-    selected_section = st.sidebar.selectbox("항목 (Section) 선택", sections_options, index=0)
+    
+    # 2. format_func를 이용해 화면에만 매핑된 긴 이름을 띄워줍니다.
+    selected_section = st.sidebar.selectbox(
+        "항목 (Section) 선택", 
+        options=sections_options, 
+        index=0,
+        format_func=lambda x: section_display_names.get(x, x) # 사전에 있으면 긴 이름, 없으면 원본 이름 표시
+    )
+    
+    # 3. 데이터 필터링은 원래 짧은 텍스트(선택된 값)를 기준으로 정상 작동합니다.
     if selected_section != '전체 (All)':
         filtered_db = filtered_db[filtered_db['항목 (Section)'] == selected_section]
+# ==========================================
+
 
 # [범위 한정 2] 세부 챕터 (ATA) -> 상위 Section 결과에만 의존하여 옵션 표시
 ata_options = sorted([ata for ata in filtered_db['ATA_Prefix'].unique() if ata != "미분류"])
@@ -161,7 +183,6 @@ if selected_ata != '전체 (All)':
     filtered_db = filtered_db[filtered_db['ATA_Prefix'] == selected_ata]
 
 # [범위 한정 3] 작업 (Task Description) -> 상위 ATA 결과에만 의존하여 옵션 표시
-# ★ 이 부분이 selectbox(콤보박스)에서 radio(리스트 나열)로 변경되었습니다.
 if '작업 (Task Description)' in filtered_db.columns:
     task_options = filtered_db['작업 (Task Description)'].dropna().unique().tolist()
     selected_task = st.sidebar.radio("작업 (Task Description) 선택", ['전체 (All)'] + task_options, index=0)
